@@ -1,0 +1,16 @@
+# Karaoke GPU stack (RTX 5070, CUDA 12.8+, Python 3.11)
+# torch уже стоит 2.11+cu128 — НЕ переустанавливать без нужды
+torch>=2.7 --index-url https://download.pytorch.org/whl/cu128
+demucs>=4.0.1
+faster-whisper>=1.0.0
+librosa>=0.10.0
+soundfile>=0.12.0
+numpy>=1.26
+scipy>=1.12
+# плеер и микрофон:
+pygame>=2.5.0
+sounddevice>=0.4.6
+# веб-бэкенд (загрузка песен через интерфейс):
+fastapi>=0.115.0
+uvicorn>=0.30.0
+python-multipart>=0.0.18

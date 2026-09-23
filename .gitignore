@@ -1,0 +1,63 @@
+# ===== Медиа (тяжёлые бинарники не коммитим) =====
+*.mp3
+*.wav
+*.flac
+*.m4a
+*.ogg
+*.opus
+*.mp4
+*.mov
+*.mkv
+*.webm
+
+# Сгенерированные данные пайплайна (пересоздаются скриптами)
+output/
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+ENV/
+*.egg-info/
+pip-log.txt
+pip-delete-this-directory.txt
+.pytest_cache/
+.coverage
+htmlcov/
+*.log
+logs/
+
+# ===== Node / Web =====
+node_modules/
+web/dist/
+dist/
+build/
+.vite/
+*.tsbuildinfo
+vite.config.*.timestamp*
+
+# ===== Env и секреты =====
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# ===== OS =====
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ===== IDE =====
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ===== Временное =====
+*.tmp
+*.temp
+.cache/
