@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:bebradio": "vite --base=/karaoke/",
     "build": "tsc --noEmit && vite build",
     "build:bebradio": "tsc --noEmit && vite build --base=/karaoke/ --mode bebradio",
     "preview": "vite preview",

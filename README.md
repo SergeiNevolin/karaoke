@@ -69,6 +69,39 @@ cd web; npm install; npm run dev               # фронт (терминал 2)
 прогоняет тот же GPU-пайплайн (Demucs → Whisper → pitch → экспорт)
 со статусом по стадиям. Детали — в `web/README.md`.
 
+## Docker
+
+```powershell
+docker compose up --build   # http://localhost:8002
+```
+
+- multi-stage образ (`karaoke_api/Dockerfile`): node:24 собирает фронт
+  (tsc + vite), python:3.11-slim c ffmpeg отдаёт API/статику; non-root
+  uid 10001, `HEALTHCHECK` по `GET /healthz` (эта точка авторизацию не спрашивает);
+- данные песен — `./data` (compose-маппинг), каталоги `data/songs` (канон)
+  и `data/public/songs` (публичный);
+- env: `AUTH_JWT_SECRET`, `KARAOKE_ML_SERVICE_URL`, `LOG_LEVEL`,
+  `MAX_UPLOAD_MB`, `MAX_BUNDLE_MB` — полный список с дефолтами в `.env.example`;
+  невалидные значения отваливаются на старте (`validate_config`);
+- CI (`.github/workflows/ci.yml`): ruff + pytest лёгкого рантайма, веб-сборка
+  и тесты, сборка образа и пуш `ghcr.io/<owner>/<repo>:<branch|semver|sha>`
+  на push в main/теги (нужен remote репозитория).
+
+## Интеграция с bebradio (префикс /karaoke/)
+
+Караоке встраивается в bebradio как отдельный сервис и открыт в UI на
+`/karaoke` (iframe; см. bebradio, раздел «Караоке»): nginx проксирует
+`/karaoke/` → `karaoke-api:8000`, авторизация — общий JWT
+(`AUTH_JWT_SECRET` = `SECRET_KEY` bebradio, HS256, клеймы `sub`+`exp`).
+
+- сборка под префикс:
+  `docker build -f karaoke_api/Dockerfile --build-arg BASE_PATH=/karaoke/ --build-arg API_BASE=/karaoke .`
+- веб в dev-режиме bebradio: `cd web; npm run dev:bebradio` (база `/karaoke/`);
+  если Go-бэкенд bebradio занял порт 8000 — свой API поднимите на другом:
+  `KARAOKE_API_URL=http://127.0.0.1:8010 npm run dev:bebradio`;
+- локальный vite-прокси bebradio ходит в `KARAOKE_URL` (дефолт
+  `http://localhost:5173` — тот самый `dev:bebradio`).
+
 ## GPU-микросервис (опционально)
 
 Тяжёлые шаги (Demucs/Whisper/CREPE) живут в GPU-микросервисе
@@ -79,14 +112,14 @@ cd web; npm install; npm run dev               # фронт (терминал 2)
 uvicorn karaoke_ml_service.app:app --host 0.0.0.0 --port 8001
 
 # на бэкенде (обязательно):
-$env:GPU_URL = "http://<gpu-host>:8001"
+$env:KARAOKE_ML_SERVICE_URL = "http://<gpu-host>:8001"
 python -m uvicorn karaoke_api.app:app --port 8000
 ```
 
-Без `GPU_URL` загрузка новых песен невозможна (задача упадёт с понятной
-ошибкой); чтение каталога и правки работают без GPU. Поток: бэкенд сабмитит
-аудио в `POST /v1/jobs`, поллит статус и забирает готовый бандл. Детали —
-в `karaoke_ml_service/README.md`.
+Если GPU-микросервис недоступен по `KARAOKE_ML_SERVICE_URL`, загрузка новых
+падает с понятной ошибкой; чтение каталога и правки работают без GPU.
+Поток: бэкенд сабмитит аудио в `POST /v1/jobs`, поллит статус и забирает
+готовый бандл. Детали — в `karaoke_ml_service/README.md`.
 
 ## Статусы API (контракт)
 
@@ -94,6 +127,7 @@ python -m uvicorn karaoke_api.app:app --port 8000
 
 | Ситуация | Ответ |
 |---|---|
+| любой `/api/*` или `/songs/*` без валидного JWT (env `AUTH_JWT_SECRET` задан) | **401** `{"error": "Требуется вход в bebradio"}` |
 | `POST /api/upload`: неверное расширение | **400** |
 | `POST /api/upload`: больше `MAX_UPLOAD_MB` (env, дефолт 1024) | **413** |
 | `GET /api/jobs/{id}`: задача неизвестна (истек TTL / рестарт) | **404** |

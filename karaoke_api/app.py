@@ -61,8 +61,10 @@ def create_app() -> FastAPI:
                      (time.perf_counter() - start) * 1000)
         return response
 
-    if DATA_PUBLIC.exists():
-        application.mount("/songs", StaticFiles(directory=str(DATA_PUBLIC)), name="songs")
+    # volume на первом старте может быть пустым: монтируем всегда, иначе
+    # статика песен «повиснет» до рестарта контейнера
+    DATA_PUBLIC.mkdir(parents=True, exist_ok=True)
+    application.mount("/songs", StaticFiles(directory=str(DATA_PUBLIC)), name="songs")
     if DIST.exists():
         application.mount("/", StaticFiles(directory=str(DIST), html=True), name="front")
     return application
