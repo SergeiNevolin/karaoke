@@ -1,7 +1,42 @@
 @import "tailwindcss";
 
+/*
+ * Палитра перенесена из bebradio (frontend/src/index.css): те же токены,
+ * те же значения. Светлая тема — в :root/@theme, тёмная — под [data-theme],
+ * как у bebradio. По умолчанию (см. index.html) — тёмная.
+ */
 @theme {
   --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+
+  --color-bg: #ffffff;
+  --color-surface: #f5f5f5;
+  --color-surface-hover: #ebebeb;
+  --color-border: #e0e0e0;
+  --color-text: #1a1a1a;
+  --color-muted: #737373;
+  --color-primary: #16a34a;
+  --color-primary-hover: #15803d;
+  --color-danger: #dc2626;
+  /* жёлтый хайлайн волны/таймлайна — фирменный цвет караоке, вне палитры bebradio */
+  --color-highlight: #fcd34d;
+
+  /* радиусы bebradio (8px база, 12px модалки) вместо 12/16/24 */
+  --radius-xl: 8px;
+  --radius-2xl: 10px;
+  --radius-3xl: 12px;
+}
+
+/* Тёмная тема — те же значения, что у bebradio ([data-theme='dark']) */
+[data-theme='dark'] {
+  --color-bg: #0a0a0a;
+  --color-surface: #141414;
+  --color-surface-hover: #1a1a1a;
+  --color-border: #262626;
+  --color-text: #e5e5e5;
+  --color-muted: #9ca3af;
+  --color-primary: #22c55e;
+  --color-primary-hover: #16a34a;
+  --color-danger: #ef4444;
 }
 
 html, body, #root {
@@ -9,14 +44,15 @@ html, body, #root {
 }
 
 body {
-  background: #0a0a0c;
-  color: #f5f4f0;
+  background: var(--color-bg);
+  color: var(--color-text);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
+  transition: background 0.2s, color 0.2s;
 }
 
 /* тонкий скроллбар под минимализм */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #3a3a42 transparent;
+  scrollbar-color: var(--color-border) transparent;
 }

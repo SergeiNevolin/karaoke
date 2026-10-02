@@ -1,0 +1,13 @@
+# GPU-сторона: всё тяжёлое (только для машины с видеокартой).
+# Ставится поверх requirements-api.txt: pip install -r requirements-gpu.txt
+-r requirements-api.txt
+
+# torch cu128 для RTX 5070 (sm_120) — не трогать версию без проверки
+torch>=2.7 --index-url https://download.pytorch.org/whl/cu128
+demucs>=4.0.1
+faster-whisper>=1.0.0
+librosa>=0.10.0
+soundfile>=0.12.0
+numpy>=1.26
+scipy>=1.12
+torchcrepe>=0.0.9

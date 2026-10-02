@@ -5,6 +5,14 @@
 микрофон с live-уровнем и полосой тона → оценка 0–100.
 Песни загружаются прямо через интерфейс (кнопка «Загрузить»).
 
+```powershell
+cd web
+npm install
+npm run dev      # фронт
+npm test         # 38 тестов: логика + аудио-движок на моках
+npm run build    # прод-сборка
+```
+
 Стек (актуальные версии): React 19, Vite 8, Tailwind CSS 4,
 framer-motion 13, lucide-react 1.x, zustand 5, pitchy 4
 (детект тона микрофона, McLeod Pitch Method).
@@ -14,7 +22,7 @@ framer-motion 13, lucide-react 1.x, zustand 5, pitchy 4
 
 ```powershell
 # терминал 1 — бэкенд (GPU-пайплайн + каталог)
-python -m uvicorn server.app:app --port 8000
+python -m uvicorn karaoke_api.app:app --port 8000
 
 # терминал 2 — фронт
 cd web

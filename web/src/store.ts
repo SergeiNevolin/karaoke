@@ -15,6 +15,7 @@ function readJSON(key: string, fallback: string[]): string[] {
 
 const FAV_KEY = 'karaoke:favorites'
 const RECENT_KEY = 'karaoke:recent'
+const MAX_RECENT = 20
 
 function persist(favorites: string[], recent: string[]) {
   try {
@@ -58,7 +59,7 @@ export const useKaraoke = create<KaraokeState>((set, get) => ({
     set({ favorites })
   },
   pushRecent: (id) => {
-    const recent = [id, ...get().recent.filter((r) => r !== id)].slice(0, 20)
+    const recent = [id, ...get().recent.filter((r) => r !== id)].slice(0, MAX_RECENT)
     persist(get().favorites, recent)
     set({ recent })
   },

@@ -1,0 +1,120 @@
+"""Оркестрация шагов пайплайна: separation -> lyrics -> pitch (классы core/, не subprocess)."""
+from __future__ import annotations
+
+import logging
+import shutil
+import subprocess
+import threading
+from pathlib import Path
+
+from .config import KEEP_WHISPER, SEPARATION_MODEL, STAGE_PROGRESS, VIDEO_EXT, WHISPER_MODEL
+from .core.lyrics import apply_text_to_segments, clean_lines
+from .core.pitch import PitchExtractor
+from .core.separate import VocalSeparator
+from .core.transcribe import Transcriber
+
+log = logging.getLogger(__name__)
+
+_whisper_lock = threading.Lock()
+_shared_transcriber: Transcriber | None = None
+
+
+def shared_transcriber() -> Transcriber:
+    """Одна модель whisper на весь процесс: повторные джобы без перезагрузки large-v3."""
+    global _shared_transcriber
+    with _whisper_lock:
+        if _shared_transcriber is None:
+            _shared_transcriber = Transcriber(model=WHISPER_MODEL)
+        return _shared_transcriber
+
+
+class PipelineError(RuntimeError):
+    pass
+
+
+def demux(src: Path, dst: Path) -> None:
+    """Видео -> wav. ffmpeg — внешний бинарник, остаётся subprocess."""
+    if not shutil.which("ffmpeg"):
+        raise PipelineError("ffmpeg не найден, видео не обработать")
+    log.info("демультиплекс %s -> %s", src.name, dst.name)
+    r = subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", str(src),
+                        "-vn", "-ar", "44100", "-ac", "2", str(dst)])
+    if r.returncode != 0 or not dst.is_file():
+        raise PipelineError("ffmpeg не смог извлечь аудиодорожку")
+
+
+class KaraokePipeline:
+    """Один прогон: владеет созданными шагами, Demucs/CREPE выгружает между шагами."""
+
+    def __init__(self, *, separator=None, transcriber=None, pitch_extractor=None,
+                 keep_whisper: bool | None = None):
+        self._sep = separator
+        self._transcriber = transcriber
+        self._pitch = pitch_extractor
+        self.keep_whisper = KEEP_WHISPER if keep_whisper is None else keep_whisper
+
+    def run(self, src: Path, work: Path, *, lang: str = "", text: str = "",
+            on_stage=None) -> dict:
+        """{vocals, minus, lyrics, pitch}; on_stage(stage, progress) — границы этапов."""
+        report = on_stage or (lambda stage, progress: None)
+        work.mkdir(parents=True, exist_ok=True)
+        audio = self._to_audio(src, work)
+
+        report("separation", STAGE_PROGRESS["separation"][0])
+        vocals, minus = self._separate(audio, work)
+        report("separation", STAGE_PROGRESS["separation"][1])
+
+        report("lyrics", STAGE_PROGRESS["lyrics"][0])
+        lyrics = self._transcribe(vocals, lang=lang, text=text)
+        report("lyrics", STAGE_PROGRESS["lyrics"][1])
+
+        report("pitch", STAGE_PROGRESS["pitch"][0])
+        pitch = self._pitch_of(vocals)
+        report("pitch", STAGE_PROGRESS["pitch"][1])
+
+        report("export", STAGE_PROGRESS["export"][0])
+        return {"vocals": vocals, "minus": minus, "lyrics": lyrics, "pitch": pitch}
+
+    def _to_audio(self, src: Path, work: Path) -> Path:
+        if src.suffix.lower() not in VIDEO_EXT:
+            return src
+        wav = work / "in.wav"
+        demux(src, wav)
+        return wav
+
+    def _separate(self, audio: Path, work: Path) -> tuple[Path, Path]:
+        owned = self._sep is None
+        sep = self._sep if self._sep is not None else VocalSeparator(model=SEPARATION_MODEL)
+        try:
+            return sep.separate(audio, work / "separated")
+        finally:
+            if owned:
+                sep.close()
+
+    def _transcribe(self, vocals: Path, *, lang: str, text: str) -> dict:
+        if self._transcriber is not None:
+            tr, owned = self._transcriber, False
+        elif self.keep_whisper:
+            tr, owned = shared_transcriber(), False  # кэш процесса — не закрываем
+        else:
+            tr, owned = Transcriber(model=WHISPER_MODEL), True
+        try:
+            data = tr.transcribe(vocals, lang=lang)
+            if text.strip():
+                segments, stats = apply_text_to_segments(
+                    data.get("segments", []), clean_lines(text))
+                data = {"language": data.get("language"), "segments": segments}
+                log.info("наложение своего текста: %s", stats)
+            return data
+        finally:
+            if owned:
+                tr.close()
+
+    def _pitch_of(self, vocals: Path) -> dict:
+        owned = self._pitch is None
+        px = self._pitch if self._pitch is not None else PitchExtractor()
+        try:
+            return px.extract(vocals)
+        finally:
+            if owned:
+                px.close()

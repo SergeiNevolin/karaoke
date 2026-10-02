@@ -10,7 +10,10 @@
 *.mkv
 *.webm
 
-# Сгенерированные данные пайплайна (пересоздаются скриптами)
+# ===== Данные и треки (контент, не код) =====
+data/
+music/
+web/public/songs/
 output/
 
 # ===== Python =====
@@ -25,7 +28,9 @@ ENV/
 pip-log.txt
 pip-delete-this-directory.txt
 .pytest_cache/
+.ruff_cache/
 .coverage
+.coverage.*
 htmlcov/
 *.log
 logs/
@@ -33,6 +38,7 @@ logs/
 # ===== Node / Web =====
 node_modules/
 web/dist/
+web/coverage/
 dist/
 build/
 .vite/

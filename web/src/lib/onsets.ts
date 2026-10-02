@@ -1,7 +1,8 @@
 /** Начала звуков (onsets) по пикам waveform — для магнита границ слов. */
 export function computeOnsets(peaks: number[], duration: number): number[] {
   const n = peaks.length
-  if (!n || !duration) return []
+  if (!n || !Number.isFinite(duration) || duration <= 0) return []
+  if (!peaks.every((p) => Number.isFinite(p))) return []
   // лёгкое сглаживание против дрожания
   const sm: number[] = new Array(n)
   for (let i = 0; i < n; i++) {
@@ -14,7 +15,7 @@ export function computeOnsets(peaks: number[], duration: number): number[] {
   const out: number[] = []
   for (let i = 1; i < n; i++) {
     if (sm[i] - sm[i - 1] >= 0.1 && sm[i] >= 0.08) {
-      const t = Math.round(i * bd * 100) / 100
+      const t = Math.round(i * bd * 1000) / 1000
       if (!out.length || t - out[out.length - 1] > 0.15) out.push(t)
     }
   }
@@ -32,5 +33,5 @@ export function snapToOnset(t: number, onsets: number[], win = 0.18): number {
       best = o
     }
   }
-  return Math.round(best * 100) / 100
+  return Math.round(best * 1000) / 1000
 }
