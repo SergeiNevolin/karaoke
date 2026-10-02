@@ -1,5 +1,5 @@
 import type { PitchTrack, Segment, SkipRange, SongData, SongMeta, WaveformData, Word } from './types'
-import { fetchManifest } from './api'
+import { AUTH_REQUIRED, AuthRequiredError, apiFetch, fetchManifest } from './api'
 import { displayPitchTrack, gatePitchToSegments, quantizePitchTrack } from './pitch'
 import { evenWords } from './wordModel'
 
@@ -12,7 +12,8 @@ async function getJSON<T>(url: string): Promise<T> {
 export async function loadManifest(): Promise<SongMeta[]> {
   try {
     return await fetchManifest()
-  } catch {
+  } catch (e) {
+    if (e instanceof AuthRequiredError) throw e
     return []
   }
 }
@@ -54,11 +55,12 @@ export async function saveSongLyrics(
   skips: SkipRange[],
 ): Promise<'server' | 'local'> {
   try {
-    const r = await fetch(`/api/songs/${encodeURIComponent(id)}/lyrics`, {
+    const r = await apiFetch(`/api/songs/${encodeURIComponent(id)}/lyrics`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ language, segments, skips }),
     })
+    if (r.status === 401) throw new AuthRequiredError(AUTH_REQUIRED)
     const data = (await r.json()) as { ok?: boolean; error?: string }
     if (r.ok && data.ok) {
       try {
@@ -69,7 +71,8 @@ export async function saveSongLyrics(
       }
       return 'server'
     }
-  } catch {
+  } catch (e) {
+    if (e instanceof AuthRequiredError) throw e
     /* бэкенд недоступен — fallback ниже */
   }
   saveLocalLyrics(id, language, segments)

@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -18,8 +19,11 @@ from fastapi.staticfiles import StaticFiles
 from . import worker
 from .api import jobs as jobs_routes
 from .api import songs as songs_routes
-from .config import DATA_PUBLIC, DIST, LOG_LEVEL
+from .auth import install_auth
+from .config import DATA_PUBLIC, DIST, LOG_LEVEL, validate_config
 from .errors import install_error_handlers
+
+log = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -32,14 +36,31 @@ async def lifespan(_app: FastAPI):
 
 
 def create_app() -> FastAPI:
+    validate_config()
     logging.basicConfig(
         level=LOG_LEVEL,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     application = FastAPI(title="Karaoke API", lifespan=lifespan)
     install_error_handlers(application)
+    install_auth(application)
     application.include_router(songs_routes.router)
     application.include_router(jobs_routes.router)
+
+    @application.get("/healthz")
+    async def healthz() -> dict[str, bool]:
+        return {"ok": True}
+
+    @application.middleware("http")
+    async def request_log(request, call_next):
+        start = time.perf_counter()
+        response = await call_next(request)
+        path = request.url.path
+        if path != "/healthz" and not path.startswith("/assets"):
+            log.info("%s %s -> %s %.0fms", request.method, path, response.status_code,
+                     (time.perf_counter() - start) * 1000)
+        return response
+
     if DATA_PUBLIC.exists():
         application.mount("/songs", StaticFiles(directory=str(DATA_PUBLIC)), name="songs")
     if DIST.exists():

@@ -1,0 +1,21 @@
+# Standalone-режим: караоке отдельно от bebradio, без входа (AUTH_JWT_SECRET пуст).
+# Запуск: docker compose up --build  (карточка на http://localhost:8002)
+services:
+  karaoke-api:
+    build:
+      context: .
+      dockerfile: karaoke_api/Dockerfile
+    image: karaoke-api:local
+    restart: unless-stopped
+    ports:
+      - "8002:8000"
+    environment:
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-}
+      KARAOKE_ML_SERVICE_URL: ${KARAOKE_ML_SERVICE_URL:-http://host.docker.internal:8001}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-1024}
+      MAX_BUNDLE_MB: ${MAX_BUNDLE_MB:-2048}
+    volumes:
+      - ./data:/app/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

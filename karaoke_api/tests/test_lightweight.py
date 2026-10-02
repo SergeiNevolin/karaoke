@@ -17,6 +17,7 @@ LIGHT_MODULES = [
     "karaoke_api.store.publish",
     "karaoke_api.lyrics",
     "karaoke_api.config",
+    "karaoke_api.auth",
     "karaoke_api.gpu_client",
     # karaoke_api.cli.export/fixtures — тоже лёгкие (импортируют только store/config).
     # karaoke_api.cli.rebuild_pitch тут нет сознательно: он ДВИЖОК перегона,

@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { apiAvailable, fetchGeniusLines, fetchManifest, getJob, uploadSong } from './api'
 
@@ -9,6 +10,9 @@ const json = (data: unknown, ok = true, status = 200) => ({
 
 afterEach(() => {
   vi.unstubAllGlobals()
+  vi.unstubAllEnvs()
+  vi.resetModules()
+  localStorage.clear()
 })
 
 describe('fetchManifest', () => {
@@ -147,5 +151,57 @@ describe('fetchGeniusLines', () => {
       vi.fn(async () => json({ error: 'Принимаются только ссылки genius.com' }, false, 400)),
     )
     await expect(fetchGeniusLines('http://x')).rejects.toThrow('Принимаются только ссылки genius.com')
+  })
+})
+
+describe('префикс и вход', () => {
+  async function freshApi(env: Record<string, string>) {
+    vi.resetModules()
+    for (const [k, v] of Object.entries(env)) vi.stubEnv(k, v)
+    return import('./api')
+  }
+
+  it('VITE_API_BASE добавляет префикс к запросам API', async () => {
+    const api = await freshApi({ VITE_API_BASE: '/karaoke' })
+    const fetch = vi.fn(async (_url: string, _init?: RequestInit) => json({ songs: [] }))
+    vi.stubGlobal('fetch', fetch)
+    await api.fetchManifest()
+    expect(fetch.mock.calls[0][0]).toBe('/karaoke/api/songs')
+  })
+
+  it('слэш на конце префикса не плодит двойной', async () => {
+    const api = await freshApi({ VITE_API_BASE: '/karaoke/' })
+    const fetch = vi.fn(async (_url: string, _init?: RequestInit) => json({ songs: [] }))
+    vi.stubGlobal('fetch', fetch)
+    await api.fetchManifest()
+    expect(fetch.mock.calls[0][0]).toBe('/karaoke/api/songs')
+  })
+
+  it('Bearer из localStorage при заданном ключе', async () => {
+    const api = await freshApi({ VITE_AUTH_STORAGE_KEY: 'token' })
+    localStorage.setItem('token', 'abc')
+    const fetch = vi.fn(async (_url: string, _init?: RequestInit) => json({ songs: [] }))
+    vi.stubGlobal('fetch', fetch)
+    await api.fetchManifest()
+    const init = fetch.mock.calls[0][1]
+    expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer abc')
+  })
+
+  it('без токена — Authorization не шлётся', async () => {
+    const api = await freshApi({ VITE_AUTH_STORAGE_KEY: 'token' })
+    const fetch = vi.fn(async (_url: string, _init?: RequestInit) => json({ songs: [] }))
+    vi.stubGlobal('fetch', fetch)
+    await api.fetchManifest()
+    const init = fetch.mock.calls[0][1]
+    expect(new Headers(init?.headers).get('Authorization')).toBeNull()
+  })
+
+  it('401 — AuthRequiredError, в статику не убегаем', async () => {
+    const api = await freshApi({})
+    const fetch = vi.fn(async (_url: string, _init?: RequestInit) => json({ error: 'no' }, false, 401))
+    vi.stubGlobal('fetch', fetch)
+    await expect(api.fetchManifest()).rejects.toBeInstanceOf(api.AuthRequiredError)
+    await expect(api.fetchManifest()).rejects.toThrow('Требуется вход в bebradio')
+    expect(fetch).toHaveBeenCalledTimes(2) // только API, fallback-а songs/manifest.json не было
   })
 })

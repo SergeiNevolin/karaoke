@@ -1,0 +1,16 @@
+# контекст сборки — корень репо; в образ копируются только web/ и karaoke_api/
+.git
+**/node_modules
+web/dist
+web/coverage
+data
+music
+output
+karaoke_api/tests
+**/__pycache__
+**/*.py[cod]
+.pytest_cache
+.ruff_cache
+.coverage
+.env
+**/.env.local

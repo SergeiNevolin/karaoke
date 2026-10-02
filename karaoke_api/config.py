@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parent.parent
 MUSIC = ROOT / "music"
@@ -14,6 +15,9 @@ DIST = ROOT / "web" / "dist"
 KARAOKE_ML_SERVICE_URL = os.environ.get("KARAOKE_ML_SERVICE_URL", "http://127.0.0.1:8001").strip()
 
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
+
+#: секрет JWT bebradio (HS256) для входа через /karaoke. Пусто — авторизация выключена.
+AUTH_JWT_SECRET = os.environ.get("AUTH_JWT_SECRET", "").strip()
 
 
 def _int_env(name: str, default: int) -> int:
@@ -28,6 +32,23 @@ def _float_env(name: str, default: float) -> float:
         return float(os.environ.get(name, "") or default)
     except ValueError:
         return default
+
+
+def validate_config() -> None:
+    """Fail-fast на старте: плохой env лучше убить контейнер, чем удивлять в рантайме."""
+    errors = []
+    if MAX_UPLOAD_MB < 1:
+        errors.append(f"MAX_UPLOAD_MB={MAX_UPLOAD_MB} — ждём целое >= 1")
+    if MAX_BUNDLE_MB < 1:
+        errors.append(f"MAX_BUNDLE_MB={MAX_BUNDLE_MB} — ждём целое >= 1")
+    url = urlparse(KARAOKE_ML_SERVICE_URL)
+    if url.scheme not in ("http", "https") or not url.netloc:
+        errors.append(
+            f"KARAOKE_ML_SERVICE_URL={KARAOKE_ML_SERVICE_URL!r} — ждём http(s)://host[:port]")
+    if LOG_LEVEL not in {"CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG", "NOTSET"}:
+        errors.append(f"LOG_LEVEL={LOG_LEVEL!r} — нет такого уровня")
+    if errors:
+        raise ValueError("Плохая конфигурация karaoke_api: " + "; ".join(errors))
 
 
 #: предел размера загружаемого файла

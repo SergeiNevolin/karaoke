@@ -4,6 +4,7 @@ import {
 } from 'lucide-react'
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { AuthRequiredError } from '../lib/api'
 import { EditorAudioEngine } from '../lib/audioEngine'
 import { computeOnsets, snapToOnset } from '../lib/onsets'
 import { mp3UrlToWavBlobUrl } from '../lib/wav'
@@ -903,16 +904,20 @@ export default function Editor({ song, onClose, onSave, onReset, onSeek, resetSi
       return
     }
     const snapSkips = [...skips]
-    void saveSongLyrics(song.id, song.language, segs, snapSkips).then((where) => {
-      onSave(segs, snapSkips)
-      setDirty(false)
-      const tail = where === 'server' ? 'на сервер' : 'локально (сервер недоступен)'
-      flash(
-        retimed > 0
-          ? `Сохранено ${tail}; в ${retimed} ${pluralLines(retimed)} слова легли заново — изменилось число слов, проверьте их`
-          : `Сохранено ${tail}: ${segs.length} строк`,
-      )
-    })
+    void saveSongLyrics(song.id, song.language, segs, snapSkips)
+      .then((where) => {
+        onSave(segs, snapSkips)
+        setDirty(false)
+        const tail = where === 'server' ? 'на сервер' : 'локально (сервер недоступен)'
+        flash(
+          retimed > 0
+            ? `Сохранено ${tail}; в ${retimed} ${pluralLines(retimed)} слова легли заново — изменилось число слов, проверьте их`
+            : `Сохранено ${tail}: ${segs.length} строк`,
+        )
+      })
+      .catch((e: unknown) => {
+        flash(e instanceof AuthRequiredError ? e.message : 'Не удалось сохранить — попробуйте снова')
+      })
   }
 
   const applyImport = () => {
