@@ -79,7 +79,7 @@ cd web; npm install; npm run dev               # фронт (терминал 2)
 docker compose up --build   # http://localhost:8002
 ```
 
-- multi-stage образ (`karaoke_api/Dockerfile`): node:24 собирает фронт
+- multi-stage образ (`Dockerfile` в корне репо): node:24 собирает фронт
   (tsc + vite), python:3.11-slim без ffmpeg (mp3 кодирует GPU-сервис)
   отдаёт API/статику; non-root
   uid 10001, `HEALTHCHECK` по `GET /healthz` (эта точка авторизацию не спрашивает);
@@ -102,7 +102,7 @@ docker compose up --build   # http://localhost:8002
 (`AUTH_JWT_SECRET` = `SECRET_KEY` bebradio, HS256, клеймы `sub`+`exp`).
 
 - сборка под префикс:
-  `docker build -f karaoke_api/Dockerfile --build-arg BASE_PATH=/karaoke/ --build-arg API_BASE=/karaoke .`
+  `docker build -f Dockerfile --build-arg BASE_PATH=/karaoke/ --build-arg API_BASE=/karaoke .`
 - веб в dev-режиме bebradio: `cd web; npm run dev:bebradio` (база `/karaoke/`);
   если Go-бэкенд bebradio занял порт 8000 — свой API поднимите на другом:
   `KARAOKE_API_URL=http://127.0.0.1:8010 npm run dev:bebradio`;
