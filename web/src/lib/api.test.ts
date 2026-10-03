@@ -204,4 +204,13 @@ describe('префикс и вход', () => {
     await expect(api.fetchManifest()).rejects.toThrow('Требуется вход в bebradio')
     expect(fetch).toHaveBeenCalledTimes(2) // только API, fallback-а songs/manifest.json не было
   })
+
+  it('hasAuthToken: встроенный режим — по токену, standalone — всегда true', async () => {
+    const withKey = await freshApi({ VITE_AUTH_STORAGE_KEY: 'token' })
+    expect(withKey.hasAuthToken()).toBe(false)
+    localStorage.setItem('token', 'abc')
+    expect(withKey.hasAuthToken()).toBe(true)
+    const standalone = await freshApi({})
+    expect(standalone.hasAuthToken()).toBe(true)
+  })
 })

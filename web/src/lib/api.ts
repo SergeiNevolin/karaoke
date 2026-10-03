@@ -21,6 +21,16 @@ function authHeaders(): Record<string, string> {
   }
 }
 
+/** есть ли вход: standalone (без ключа) — авторизация выключена; встроенный — токен в localStorage */
+export function hasAuthToken(): boolean {
+  if (!TOKEN_KEY) return true
+  try {
+    return Boolean(localStorage.getItem(TOKEN_KEY))
+  } catch {
+    return false
+  }
+}
+
 export interface UploadOptions {
   lang: string
 }

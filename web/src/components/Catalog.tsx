@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
 import { Clock, Disc3, Heart, LayoutGrid, ListMusic, MicVocal, Plus, Search, Loader2, Sparkles, X } from 'lucide-react'
-import { apiAvailable } from '../lib/api'
+import { apiAvailable, hasAuthToken } from '../lib/api'
 import { loadSong } from '../lib/songs'
 import { formatTime } from '../lib/songs'
 import { hasLocalLyrics, loadManifest } from '../lib/songs'
@@ -106,13 +106,16 @@ export default function Catalog() {
   const [q, setQ] = useState('')
   const [tab, setTab] = useState<Tab>('all')
   const [uploadOpen, setUploadOpen] = useState(false)
-  const [canUpload, setCanUpload] = useState(false)
+  const [apiUp, setApiUp] = useState(false)
   const [hintOpen, setHintOpen] = useState(false)
   const [refreshError, setRefreshError] = useState<string | null>(null)
   const setLoadingSong = useKaraoke((s) => s.setLoadingSong)
 
+  // загрузка — только для вошедших: бэкенд жив + токен (или standalone без входа)
+  const canUpload = apiUp && hasAuthToken()
+
   useEffect(() => {
-    apiAvailable().then(setCanUpload).catch(() => setCanUpload(false))
+    apiAvailable().then(setApiUp).catch(() => setApiUp(false))
     try {
       if (!localStorage.getItem(HINT_KEY)) setHintOpen(true)
     } catch {
@@ -237,9 +240,11 @@ export default function Catalog() {
           <p className="mt-2 max-w-md text-sm leading-relaxed text-muted">
             {canUpload
               ? 'Нажмите «Загрузить» и добавьте первую песню — вокал отделится сам.'
-              : 'Запустите бэкенд и загрузите песню через интерфейс, либо соберите пайплайном:'}
+              : apiUp
+                ? 'Загрузка песен — только для вошедших: войдите в bebradio, и кнопка появится.'
+                : 'Запустите бэкенд и загрузите песню через интерфейс, либо соберите пайплайном:'}
           </p>
-          {!canUpload && (
+          {!apiUp && (
             <code className="mt-4 rounded-xl bg-surface-hover px-4 py-3 text-left text-[12.5px] leading-relaxed text-muted">
               python -m uvicorn karaoke_api.app:app --port 8000
               <br />

@@ -1,6 +1,10 @@
 """Аутентификация: общий с bebradio JWT (HS256) + cookie для статики песен.
 
-Работает только когда задан AUTH_JWT_SECRET (иначе режим standalone без входа).
+Чтение (GET/HEAD/OPTIONS) открыто без регистрации: каталог, стриминг песен,
+тексты и документация доступны анонимно. Запись (загрузка песен, правка
+текстов) требует валидного входа в bebradio.
+Работает только когда задан AUTH_JWT_SECRET (иначе режим standalone без входа,
+открыто всё).
 Принимаем токен из заголовка Authorization: Bearer или из cookie karaoke_auth —
 cookie нужен, чтобы <audio>/<img> с /songs/* ходили без заголовка.
 Токены bebradio без sub (room-токены) отвергаются: требуем непустой sub.
@@ -21,8 +25,10 @@ log = logging.getLogger(__name__)
 COOKIE_NAME = "karaoke_auth"
 UNAUTHORIZED = {"error": "Требуется вход в bebradio"}
 
-#: защищаем API, статику песен и интерактивную документацию; сам SPA остаётся открыт
+#: области с закрытой записью (чтение всегда открыто): API, статика песен, доки
 _PROTECTED = ("/api/", "/songs/", "/docs", "/redoc", "/openapi.json")
+#: безопасные методы — чтение, ими ничего не пишем
+_SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 
 
 def _needs_auth(path: str) -> bool:
@@ -63,19 +69,17 @@ def install_auth(app: FastAPI) -> None:
     @app.middleware("http")
     async def auth_middleware(request: Request, call_next):
         path = request.url.path
-        if not _needs_auth(path):
-            return await call_next(request)
         secret = config.AUTH_JWT_SECRET
-        if not secret:
-            return await call_next(request)
         token = _extract_token(request)
-        claims = _decode(token, secret) if token else None
-        if claims is None:
-            log.info("401 %s", path)
+        claims = _decode(token, secret) if (secret and token) else None
+        # чтение открыто без входа; запись (upload, правка текстов) — только с JWT
+        if secret and claims is None and _needs_auth(path) \
+                and request.method not in _SAFE_METHODS:
+            log.info("401 %s %s", request.method, path)
             return JSONResponse(UNAUTHORIZED, status_code=401)
         response = await call_next(request)
         # cookie для медиа-тегов: выдаём/освежаем при запросе с Bearer
-        if request.headers.get("authorization", "").lower().startswith("bearer "):
+        if claims is not None and request.headers.get("authorization", "").lower().startswith("bearer "):
             exp = claims.get("exp")
             max_age = max(60, int(exp - time.time())) if isinstance(exp, (int, float)) else 7 * 24 * 3600
             response.set_cookie(

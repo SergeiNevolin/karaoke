@@ -100,6 +100,9 @@ docker compose up --build   # http://localhost:8002
 `/karaoke` (iframe; см. bebradio, раздел «Караоке»): nginx проксирует
 `/karaoke/` → `karaoke-service:8000`, авторизация — общий JWT
 (`AUTH_JWT_SECRET` = `SECRET_KEY` bebradio, HS256, клеймы `sub`+`exp`).
+Каталог, стриминг `/songs/*`, тексты и `/docs` открыты без регистрации;
+загрузка песен (`POST /api/upload`) и правка текстов (`PUT .../lyrics`) —
+только для вошедших в bebradio.
 
 - сборка под префикс:
   `docker build -f Dockerfile --build-arg BASE_PATH=/karaoke/ --build-arg API_BASE=/karaoke .`
@@ -134,7 +137,7 @@ python -m uvicorn karaoke_api.app:app --port 8000
 
 | Ситуация | Ответ |
 |---|---|
-| любой `/api/*` или `/songs/*` без валидного JWT (env `AUTH_JWT_SECRET` задан) | **401** `{"error": "Требуется вход в bebradio"}` |
+| запись в `/api/*` (загрузка, правка текстов) без валидного JWT (env `AUTH_JWT_SECRET` задан) | **401** `{"error": "Требуется вход в bebradio"}` |
 | `POST /api/upload`: неверное расширение | **400** |
 | `POST /api/upload`: больше `MAX_UPLOAD_MB` (env, дефолт 1024) | **413** |
 | `GET /api/jobs/{id}`: задача неизвестна (истек TTL / рестарт) | **404** |
