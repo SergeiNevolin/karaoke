@@ -4,7 +4,7 @@
 # Запуск: docker compose up --build  (интерфейс на http://localhost:8002)
 services:
   minio:
-    image: quay.io/minio/minio:latest
+    image: pgsty/silo:latest
     command: server /data --console-address ":9001"
     # порты 91xx, чтобы не конфликтовать с MinIO из bebradio (9000/9001)
     ports:
