@@ -69,7 +69,7 @@ def test_lyrics_invalid_payload_400(client):
 
 def test_lyrics_put_publish_fail_still_ok(client, monkeypatch):
     def boom(sid):
-        raise RuntimeError("ffmpeg missing")
+        raise RuntimeError("нет minus.mp3 — перезапустите обработку песни")
 
     monkeypatch.setattr(api_songs, "publish_one", boom)
     r = client.put("/api/songs/t/lyrics", json={

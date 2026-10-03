@@ -7,7 +7,8 @@ GPU-микросервис: ВЕСЬ пайплайн «аудио -> карао
 Job API (бэкенд только сабмитит и поллит статус):
   POST /v1/jobs {file, lang, lyrics_text} -> {job_id}
   GET  /v1/jobs/{id} -> {state, stage, progress, error?}
-  GET  /v1/jobs/{id}/result -> zip {vocals.wav, minus.wav, lyrics.json, pitch.json}
+  GET  /v1/jobs/{id}/result -> zip {vocals.wav, minus.wav, minus.mp3,
+                                    vocals.mp3, original.mp3, lyrics.json, pitch.json}
   GET  /v1/info -> {demucs, whisper, pitch}: чем реально считаем
   POST /v1/pitch -> {t, midi, conf} (пошаговый перегон, для rebuild_pitch)
 
@@ -47,7 +48,7 @@ from .config import (
 from .core.pitch import PitchExtractor
 from .errors import ApiError, install_error_handlers
 from .jobs import Job, JobRegistry
-from .pipeline import KaraokePipeline
+from .pipeline import KaraokePipeline, encode_mp3
 
 log = logging.getLogger(__name__)
 logging.basicConfig(level=LOG_LEVEL,
@@ -95,17 +96,26 @@ async def _save_upload(file: UploadFile, dest: Path) -> None:
 
 
 def _write_bundle(zip_path: Path, result: dict) -> None:
-    for key in ("vocals", "minus"):
-        if not Path(result[key]).is_file():
-            raise RuntimeError(f"пайплайн не вернул {key}.wav")
-    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
-        z.write(result["vocals"], "vocals.wav")
-        z.write(result["minus"], "minus.wav")
-        z.writestr("lyrics.json", json.dumps(
-            {"language": result["lyrics"].get("language"),
-             "segments": result["lyrics"].get("segments", [])},
-            ensure_ascii=False))
-        z.writestr("pitch.json", json.dumps(result["pitch"]))
+    """Бандл: wav + mp3 (кодирует тут же, ffmpeg есть только у нас) + JSON."""
+    for key, suffix in (("vocals", ".wav"), ("minus", ".wav"), ("original", "")):
+        if key not in result or not Path(result[key]).is_file():
+            raise RuntimeError(f"пайплайн не вернул {key}{suffix}")
+    with tempfile.TemporaryDirectory(prefix="karaoke-mp3-") as td:
+        mp3s: dict[str, Path] = {}
+        for key in ("minus", "vocals", "original"):
+            dst = Path(td) / f"{key}.mp3"
+            encode_mp3(Path(result[key]), dst)
+            mp3s[key] = dst
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
+            z.write(result["vocals"], "vocals.wav")
+            z.write(result["minus"], "minus.wav")
+            for key, path in mp3s.items():
+                z.write(path, f"{key}.mp3")
+            z.writestr("lyrics.json", json.dumps(
+                {"language": result["lyrics"].get("language"),
+                 "segments": result["lyrics"].get("segments", [])},
+                ensure_ascii=False))
+            z.writestr("pitch.json", json.dumps(result["pitch"]))
 
 
 def _run_job(job: Job) -> None:

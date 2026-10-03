@@ -80,7 +80,8 @@ docker compose up --build   # http://localhost:8002
 ```
 
 - multi-stage образ (`karaoke_api/Dockerfile`): node:24 собирает фронт
-  (tsc + vite), python:3.11-slim c ffmpeg отдаёт API/статику; non-root
+  (tsc + vite), python:3.11-slim без ffmpeg (mp3 кодирует GPU-сервис)
+  отдаёт API/статику; non-root
   uid 10001, `HEALTHCHECK` по `GET /healthz` (эта точка авторизацию не спрашивает);
 - compose поднимает свой MinIO (порты 9100/9001, чтобы не пересекаться с
   bebradio); `./data` в контейнере — рабочая область (scratch) и источник
@@ -151,7 +152,7 @@ python -m uvicorn karaoke_api.app:app --port 8000
 ## Хранилище (MinIO/S3)
 
 Все постоянные данные песен — в объектном хранилище, локальный диск только
-рабочая область (распаковка бандлов, ffmpeg, scratch воркера):
+рабочая область (распаковка бандлов, scratch воркера):
 
 | Что | Где |
 |---|---|

@@ -11,9 +11,9 @@
   waveform.json  пики громкости вокала (пишет publish)
   vocals.wav     изолированный вокал (Demucs)
   minus.wav      минус (no_vocals)
-  minus.mp3      опубликованный минус для плеера (publish)
-  original.mp3   полная песня для редактора (publish)
-  vocals.mp3     запасной трек редактора (publish)
+  minus.mp3      опубликованный минус для плеера (из бандла GPU-сервиса)
+  original.mp3   полная песня для редактора (из бандла)
+  vocals.mp3     запасной трек редактора (из бандла)
   history/       бэкапы lyrics.json при каждом сохранении (последние 20)
 
 Всё это же пространство отдаётся наружу как /songs/<id>/...; каталог
@@ -154,17 +154,20 @@ def save_lyrics(sid: str, data: dict) -> dict:
 
 
 def manifest_entry(sid: str) -> dict | None:
-    """Строка каталога для фронта (public-имена файлов)."""
+    """Строка каталога для фронта (public-имена файлов).
+
+    original/vocals — только если mp3 реально лежит в бакете: ссылка
+    на несуществующий файл ломает редактор.
+    """
     meta = read_meta(sid)
     if not meta:
         return None
-    has_source = bool(meta.get("source", {}).get("file"))
     return {
         "id": sid,
         "title": meta.get("title", sid),
         "audio": f"songs/{sid}/minus.mp3",
-        "original": f"songs/{sid}/original.mp3" if has_source else None,
-        "vocals": f"songs/{sid}/vocals.mp3" if minio.exists(song_key(sid, "vocals.wav")) else None,
+        "original": f"songs/{sid}/original.mp3" if minio.exists(song_key(sid, "original.mp3")) else None,
+        "vocals": f"songs/{sid}/vocals.mp3" if minio.exists(song_key(sid, "vocals.mp3")) else None,
         "language": meta.get("language"),
         "lines": meta.get("lines", 0),
         "duration": meta.get("duration", 0),

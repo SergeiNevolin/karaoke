@@ -95,14 +95,18 @@ def test_manifest():
     assert [s["id"] for s in m["songs"]] == ["a", "b"]  # сортировка по названию
     e = manifest_entry("a")
     assert e["audio"] == "songs/a/minus.mp3"
-    assert e["original"] is None  # нет source
-    assert e["vocals"] is None  # нет vocals.wav
+    assert e["original"] is None  # нет original.mp3 в бакете
+    assert e["vocals"] is None  # нет vocals.mp3 в бакете
     assert manifest_entry("nope") is None
 
 
 def test_manifest_vocals_flag():
+    """Ссылка на mp3 — только когда сам mp3 лежит в бакете (wav не считается)."""
     _song("a")
-    minio.put(song_key("a", "vocals.wav"), b"RIFF")
+    assert manifest_entry("a")["vocals"] is None
+    minio.put(song_key("a", "vocals.wav"), b"RIFF")  # одного wav мало
+    assert manifest_entry("a")["vocals"] is None
+    minio.put(song_key("a", "vocals.mp3"), b"ID3")
     assert manifest_entry("a")["vocals"] == "songs/a/vocals.mp3"
 
 

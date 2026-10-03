@@ -1,28 +1,25 @@
 """Публикация песни: опубликованные артефакты лежат РЯДОМ с каноном.
 
 Один бакет, один префикс songs/<id>/ — публикация добавляет туда же:
-  minus.mp3      (ffmpeg из minus.wav — минус для пения)
-  original.mp3   (ffmpeg из исходника в music/ — полная песня, редактор)
-  vocals.mp3     (ffmpeg из vocals.wav — запасной трек редактора)
-  waveform.json  (пики громкости вокала)
+  minus.mp3 / vocals.mp3 / original.mp3 — привозит бандл GPU-сервиса
+    (ffmpeg живёт только там; здесь проверяем лишь наличие)
+  waveform.json  (пики громкости вокала, из vocals.wav)
   pitch.json     (если канон не привёз — ставим пустой эталон)
 
-mp3 не перекодируем, если новее исходника (PUT lyrics — только JSON за миллисекунды).
+Всё решается по head(): PUT lyrics — только JSON за миллисекунды,
+wav из бакета качаем лишь для первичного расчёта waveform.
 CLI — karaoke_api.cli.export, рантайм — publish_one.
 """
 from __future__ import annotations
 
 import array
 import logging
-import shutil
-import subprocess
 import tempfile
 import wave
 from pathlib import Path
 
 from karaoke_api import minio
-from karaoke_api.store.songs import all_ids, read_lyrics, read_meta, song_key, wav_seconds
-from karaoke_api.utils import slug
+from karaoke_api.store.songs import all_ids, read_lyrics, read_meta, song_key
 
 log = logging.getLogger(__name__)
 
@@ -57,112 +54,67 @@ def waveform_peaks(path: Path, buckets: int = 1200) -> tuple[list[float], float]
     return peaks, round(n / sr, 1)
 
 
-def _fresh(dest_head: dict | None, src_head: dict | None) -> bool:
-    """mp3 не трогаем, если новее исходника (PUT lyrics — только JSON)."""
-    if not dest_head or not src_head:
-        return False
-    return dest_head["last_modified"] >= src_head["last_modified"]
-
-
-def encode_mp3(src: Path, dst: Path, quality: str, what: str) -> bool:
-    log.info("%s -> %s", what, dst.name)
-    r = subprocess.run(
-        ["ffmpeg", "-y", "-v", "error", "-i", str(src),
-         "-codec:a", "libmp3lame", "-q:a", quality, str(dst)]
-    )
-    if r.returncode != 0:
-        log.error("ffmpeg упал на %s", src)
-        return False
-    return True
-
-
-def _ensure_mp3(src_local: Path, src_head: dict | None, sid: str, name: str,
-                quality: str, title: str, tmp: Path) -> str | None:
-    """Свежий mp3 в бакете (перекодируем при необходимости) -> публичный путь."""
-    key = song_key(sid, name)
-    if not _fresh(minio.head(key), src_head):
-        if not encode_mp3(src_local, tmp / name, quality, f"{title}: {name}"):
-            return None
-        minio.put_file(key, tmp / name)
+def _rel_if(sid: str, name: str) -> str | None:
+    """Публичный путь mp3, если он есть в бакете."""
+    if minio.head(song_key(sid, name)) is None:
+        return None
     return f"songs/{sid}/{name}"
 
 
-def _original_key(sid: str, meta: dict, title: str) -> str | None:
-    """Исходник полной песни: meta.source.file, иначе совпадение в music/."""
-    src = str((meta.get("source") or {}).get("file") or "")
-    if src and minio.exists(src):
-        return src
-    want = slug(title)
-    for key in minio.list_keys("music/"):
-        stem = key.rsplit("/", 1)[-1].rsplit(".", 1)[0]
-        if slug(stem) == want or stem == sid:
-            return key
-    return None
+def _ensure_waveform(sid: str, title: str) -> None:
+    """Пики вокала: считаем один раз на версию vocals.wav (проверка по head)."""
+    wav_head = minio.head(song_key(sid, "vocals.wav"))
+    if wav_head is None:
+        log.warning("%s: нет vocals.wav, waveform недоступен", title)
+        return
+    wf_head = minio.head(song_key(sid, "waveform.json"))
+    if wf_head is not None and wf_head["last_modified"] >= wav_head["last_modified"]:
+        return  # уже посчитан для этой версии вокала
+    with tempfile.TemporaryDirectory(prefix=f"waveform-{sid}-") as td:
+        local = Path(td) / "vocals.wav"
+        minio.download(song_key(sid, "vocals.wav"), local)
+        peaks, wdur = waveform_peaks(local)
+    minio.put_json(song_key(sid, "waveform.json"), {"peaks": peaks, "duration": wdur})
 
 
-def publish_song(sid: str, quality: str = "4") -> dict | None:
-    """Одна песня: канон -> опубликованные mp3/JSON в том же префиксе."""
+def publish_song(sid: str) -> dict:
+    """Одна песня: канон -> опубликованные артефакты в том же префиксе.
+
+    mp3 кодирует GPU-сервис (в бандле) — здесь их отсутствие громко
+    падает, а не притворяется успехом.
+    """
     meta = read_meta(sid)
     title = meta.get("title", sid)
-    minus_head = minio.head(song_key(sid, "minus.wav"))
-    if minus_head is None:
-        log.info("[SKIP] %s: нет минуса", title)
-        return None
+    if minio.head(song_key(sid, "minus.mp3")) is None:
+        raise RuntimeError(f"{title}: нет minus.mp3 — перезапустите обработку песни")
 
-    tmp = Path(tempfile.mkdtemp(prefix=f"publish-{sid}-"))
-    try:
-        minus_local = tmp / "minus.wav"
-        minio.download(song_key(sid, "minus.wav"), minus_local)
-        if _ensure_mp3(minus_local, minus_head, sid, "minus.mp3", quality, title, tmp) is None:
-            return None
+    if minio.head(song_key(sid, "pitch.json")) is None:
+        minio.put_json(song_key(sid, "pitch.json"), {"t": [], "midi": []})
 
-        if minio.head(song_key(sid, "pitch.json")) is None:
-            minio.put_json(song_key(sid, "pitch.json"), {"t": [], "midi": []})
+    lyr = read_lyrics(sid) or {}
+    segments = lyr.get("segments", [])
 
-        lyr = read_lyrics(sid) or {}
-        segments = lyr.get("segments", [])
+    original_rel = _rel_if(sid, "original.mp3")
+    if original_rel is None:
+        log.warning("%s: original.mp3 отсутствует (старый бандл?)", title)
+    vocals_rel = _rel_if(sid, "vocals.mp3")
+    _ensure_waveform(sid, title)
 
-        # полная песня — играется в редакторе (исходник из meta.source / music/)
-        original_rel = None
-        original_key = _original_key(sid, meta, title)
-        if original_key is None:
-            log.warning("%s: нет исходника для original.mp3", title)
-        else:
-            src_local = tmp / "original.src"
-            minio.download(original_key, src_local)
-            original_rel = _ensure_mp3(src_local, minio.head(original_key), sid,
-                                       "original.mp3", quality, title, tmp)
-
-        # изолированный вокал — запасной трек редактора + пики waveform
-        vocals_rel = None
-        vocals_head = minio.head(song_key(sid, "vocals.wav"))
-        if vocals_head is not None:
-            vocals_local = tmp / "vocals.wav"
-            minio.download(song_key(sid, "vocals.wav"), vocals_local)
-            vocals_rel = _ensure_mp3(vocals_local, vocals_head, sid, "vocals.mp3",
-                                     quality, title, tmp)
-            peaks, wdur = waveform_peaks(vocals_local)
-            minio.put_json(song_key(sid, "waveform.json"), {"peaks": peaks, "duration": wdur})
-        else:
-            log.warning("%s: нет vocals.wav, waveform и запасной трек недоступны", title)
-
-        return {
-            "id": sid,
-            "title": title,
-            "audio": f"songs/{sid}/minus.mp3",
-            "original": original_rel,
-            "vocals": vocals_rel,
-            "language": lyr.get("language"),
-            "lines": len(segments),
-            "duration": meta.get("duration", round(wav_seconds(minus_local), 1)),
-        }
-    finally:
-        shutil.rmtree(tmp, ignore_errors=True)
+    return {
+        "id": sid,
+        "title": title,
+        "audio": f"songs/{sid}/minus.mp3",
+        "original": original_rel,
+        "vocals": vocals_rel,
+        "language": lyr.get("language"),
+        "lines": len(segments),
+        "duration": meta.get("duration"),
+    }
 
 
-def publish_one(sid: str, quality: str = "4") -> dict | None:
+def publish_one(sid: str) -> dict:
     """Публикация одной песни (вызывается из API/воркера)."""
-    return publish_song(sid, quality)
+    return publish_song(sid)
 
 
 def select_sids(only: str | None) -> list[str]:

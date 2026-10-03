@@ -28,6 +28,9 @@ def _bundle(extra: dict | None = None) -> bytes:
     with zipfile.ZipFile(buf, "w") as z:
         z.writestr("vocals.wav", _wav_bytes())
         z.writestr("minus.wav", _wav_bytes())
+        z.writestr("minus.mp3", b"ID3fake-minus")
+        z.writestr("vocals.mp3", b"ID3fake-vocals")
+        z.writestr("original.mp3", b"ID3fake-original")
         z.writestr("lyrics.json",
                    '{"language": "ru", "segments": [{"start": 0, "end": 1, "text": "a", "words": []}]}')
         z.writestr("pitch.json", '{"t": [0], "midi": [60], "conf": [0.9]}')
@@ -96,8 +99,24 @@ def test_run_job_happy():
     assert meta["source"]["sha1"]  # посчитан по скачанному исходнику
     assert minio.exists("songs/test/vocals.wav")
     assert minio.exists("songs/test/minus.wav")
+    assert minio.exists("songs/test/minus.mp3")   # mp3 привёз бандл
+    assert minio.exists("songs/test/original.mp3")
     assert minio.exists("songs/test/meta.json")
     assert not list(SCRATCH.glob("job-*"))  # скраб всегда убирается
+
+
+def test_run_job_rejects_bundle_without_mp3():
+    """Бандл без mp3 (старый GPU-сервис) — задача падает, а не публикуется без них."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("vocals.wav", _wav_bytes())
+        z.writestr("minus.wav", _wav_bytes())
+        z.writestr("lyrics.json", '{"language": "ru", "segments": []}')
+        z.writestr("pitch.json", '{"t": [], "midi": []}')
+    registry, job, _ = _run(gpu=FakeGpu(bundle=buf.getvalue()))
+    assert job.state == "error"
+    assert "Бандл без" in (job.error or "")
+    assert not list(SCRATCH.glob("job-*"))
 
 
 def test_run_job_video_passthrough():
@@ -150,7 +169,7 @@ def test_run_job_publish_failure_retries_then_error():
 
     def bad(sid):
         calls["n"] += 1
-        raise RuntimeError("ffmpeg missing")
+        raise RuntimeError("нет minus.mp3 — перезапустите обработку песни")
 
     registry, job, _ = _run(publisher=bad)
     assert calls["n"] == 2  # один повтор

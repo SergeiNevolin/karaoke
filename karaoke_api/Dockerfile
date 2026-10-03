@@ -14,14 +14,11 @@ RUN npx tsc --noEmit \
  && VITE_API_BASE="${API_BASE}" VITE_AUTH_STORAGE_KEY="${AUTH_STORAGE_KEY}" \
     npx vite build --base="${BASE_PATH}"
 
-# ---- бэкенд: лёгкий API (никаких torch/demucs/whisper) ----
+# ---- бэкенд: лёгкий API (никаких torch/demucs/whisper/ffmpeg) ----
 FROM python:3.11-slim
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1
-# ffmpeg нужен publish_one: wav из GPU-пайплайна -> mp3 в data/public/songs
-RUN apt-get update \
- && apt-get install -y --no-install-recommends ffmpeg \
- && rm -rf /var/lib/apt/lists/*
+# ffmpeg здесь НЕ нужен: mp3 кодирует GPU-сервис и привозит их в бандле
 WORKDIR /app
 COPY requirements-api.txt ./
 RUN pip install -r requirements-api.txt

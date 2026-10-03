@@ -61,7 +61,13 @@ def test_pipeline_lifecycle(api, tmp_path):
     r = api.get(f"/v1/jobs/{jid}/result")
     assert r.status_code == 200
     z = zipfile.ZipFile(io.BytesIO(r.content))
-    assert set(z.namelist()) == {"vocals.wav", "minus.wav", "lyrics.json", "pitch.json"}
+    assert set(z.namelist()) == {"vocals.wav", "minus.wav",
+                                 "minus.mp3", "vocals.mp3", "original.mp3",
+                                 "lyrics.json", "pitch.json"}
+    for name in ("minus.mp3", "vocals.mp3", "original.mp3"):
+        d = z.read(name)
+        # ID3-тег либо синхронизация кадра MPEG (0xFF + 11 бит)
+        assert len(d) > 100 and (d[:3] == b"ID3" or (d[0] == 0xFF and d[1] & 0xE0 == 0xE0)), name
     lyrics = __import__("json").loads(z.read("lyrics.json"))
     assert lyrics["language"] == "ru" and lyrics["segments"]
     # диск под задачей: бандл остался, вход и рабочий каталог вычищены

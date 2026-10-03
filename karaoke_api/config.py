@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parent.parent
 DIST = ROOT / "web" / "dist"
-#: рабочая область на диске (бандлы пайплайна, ffmpeg, upload-буфер) — НЕ хранилище
+#: рабочая область на диске (бандлы пайплайна, upload-буфер) — НЕ хранилище
 SCRATCH = ROOT / "data" / "scratch"
 
 #: легаси-каталоги исходной файловой системы; нужны только cli.migrate_storage

@@ -43,6 +43,19 @@ def demux(src: Path, dst: Path) -> None:
         raise PipelineError("ffmpeg не смог извлечь аудиодорожку")
 
 
+def encode_mp3(src: Path, dst: Path, quality: str = "4") -> None:
+    """mp3 для бандла (-q:a 4 ~= VBR 165kbps). Кодирует ТОЛЬКО GPU-сервис —
+    в karaoke_api ffmpeg нет, задача без mp3 там упадёт при публикации."""
+    if not shutil.which("ffmpeg"):
+        raise PipelineError("ffmpeg не найден, mp3 не закодировать")
+    log.info("mp3 %s -> %s", src.name, dst.name)
+    r = subprocess.run(
+        ["ffmpeg", "-y", "-v", "error", "-i", str(src), "-vn",
+         "-codec:a", "libmp3lame", "-q:a", quality, str(dst)])
+    if r.returncode != 0 or not dst.is_file():
+        raise PipelineError(f"ffmpeg не смог закодировать {dst.name}")
+
+
 class KaraokePipeline:
     """Один прогон: владеет созданными шагами, Demucs/CREPE выгружает между шагами."""
 
@@ -55,7 +68,7 @@ class KaraokePipeline:
 
     def run(self, src: Path, work: Path, *, lang: str = "", text: str = "",
             on_stage=None) -> dict:
-        """{vocals, minus, lyrics, pitch}; on_stage(stage, progress) — границы этапов."""
+        """{vocals, minus, original, lyrics, pitch}; on_stage(stage, progress) — границы этапов."""
         report = on_stage or (lambda stage, progress: None)
         work.mkdir(parents=True, exist_ok=True)
         audio = self._to_audio(src, work)
@@ -73,7 +86,10 @@ class KaraokePipeline:
         report("pitch", STAGE_PROGRESS["pitch"][1])
 
         report("export", STAGE_PROGRESS["export"][0])
-        return {"vocals": vocals, "minus": minus, "lyrics": lyrics, "pitch": pitch}
+        # original — полная песня: путь к demux-входу (для аудио — сам src),
+        # по нему в бандл кодируется original.mp3 для редактора
+        return {"vocals": vocals, "minus": minus, "original": str(audio),
+                "lyrics": lyrics, "pitch": pitch}
 
     def _to_audio(self, src: Path, work: Path) -> Path:
         if src.suffix.lower() not in VIDEO_EXT:

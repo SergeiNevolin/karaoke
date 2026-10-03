@@ -35,10 +35,11 @@ def test_stage_sequence_and_progress(tmp_path):
     assert events[6][1] == STAGE_PROGRESS["export"][0]
     progresses = [p for _, p in events]
     assert progresses == sorted(progresses), "прогресс должен идти вверх"
-    assert set(res) == {"vocals", "minus", "lyrics", "pitch"}
+    assert set(res) == {"vocals", "minus", "original", "lyrics", "pitch"}
     assert res["lyrics"]["language"] == "ru"
     from pathlib import Path
     assert Path(res["vocals"]).is_file() and Path(res["minus"]).is_file()
+    assert Path(res["original"]).is_file()  # demux-вход, из него original.mp3
 
 
 def test_lang_passed_to_transcriber(tmp_path):

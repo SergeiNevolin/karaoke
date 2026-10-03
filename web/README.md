@@ -56,7 +56,7 @@ npm run build    # dist/ подхватится бэкендом: http://localho
 # 1. собрать песню GPU-пайплайном (Demucs + Whisper + pitch)
 python src/make_karaoke.py "music/трек.mp3" --model htdemucs --whisper large-v3 --lang ru
 
-# 2. экспортировать в веб-каталог (минус жмётся в mp3 через ffmpeg)
+# 2. экспортировать в веб-каталог (mp3 привозит GPU-сервис в бандле)
 python web/scripts/export_songs.py
 ```
 

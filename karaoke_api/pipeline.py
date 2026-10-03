@@ -24,8 +24,10 @@ from .utils import atomic_write_json, now_iso, slug
 
 log = logging.getLogger(__name__)
 
-#: файлы, которые обязан привезти бандл GPU-сервиса (ничего сверх — не распаковываем)
-BUNDLE_FILES = ("vocals.wav", "minus.wav", "lyrics.json", "pitch.json")
+#: файлы, которые обязан привезти бандл GPU-сервиса (ничего сверх — не распаковываем).
+#: mp3 кодирует там же: в API бинарника ffmpeg нет, publish только проверяет наличие.
+BUNDLE_FILES = ("vocals.wav", "minus.wav", "minus.mp3", "vocals.mp3",
+                "original.mp3", "lyrics.json", "pitch.json")
 
 
 class PipelineError(RuntimeError):
