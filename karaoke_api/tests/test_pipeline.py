@@ -1,4 +1,4 @@
-"""Пайплайн: сабмит -> поллинг -> безопасная распаковка -> store -> публикация."""
+"""Пайплайн: сабмит -> бандл -> установка в объекты store -> публикация."""
 import array
 import io
 import wave
@@ -6,6 +6,8 @@ import zipfile
 from pathlib import Path
 
 import karaoke_api.worker as W
+from karaoke_api import minio
+from karaoke_api.config import SCRATCH
 from karaoke_api.pipeline import run_job
 from karaoke_api.registry import JobRegistry
 from karaoke_api.store.songs import read_lyrics, read_meta
@@ -59,13 +61,12 @@ class FakeGpu:
         return {"models": "fake"}
 
 
-def _run(tmp_path, gpu=None, *, title="Test", src_name="song.mp3", lyrics_text="",
+def _run(gpu=None, *, title="Test", src_name="song.mp3", lyrics_text="",
          lyrics_url="", publisher=None, poll_interval=0.0, timeout_sec=5.0, fetcher=None):
-    store = tmp_path / "songs"
-    src = tmp_path / src_name
-    src.write_bytes(b"fake-audio")
+    src_key = f"music/{src_name}"
+    minio.put(src_key, b"fake-audio")
     registry = JobRegistry(ttl_sec=60)
-    job = registry.create(title=title, audio=src, lang="ru",
+    job = registry.create(title=title, audio=src_key, lang="ru",
                           lyrics_text=lyrics_text, lyrics_url=lyrics_url)
     published: list[str] = []
 
@@ -74,104 +75,115 @@ def _run(tmp_path, gpu=None, *, title="Test", src_name="song.mp3", lyrics_text="
         if publisher is not None:
             publisher(sid)
 
-    run_job(job, registry, store=store,
+    run_job(job, registry,
             gpu_factory=lambda url: gpu or FakeGpu(),
             publisher=_publish,
             fetcher=fetcher, poll_interval=poll_interval, timeout_sec=timeout_sec)
-    return registry, job, store, published
+    return registry, job, published
 
 
-def test_run_job_happy(tmp_path):
-    registry, job, store, published = _run(tmp_path)
+def test_run_job_happy():
+    registry, job, published = _run()
     assert job.state == "done"
     assert job.song_id == "test"
     assert job.progress == 100
     assert published == ["test"]
-    assert read_lyrics(store, "test")["segments"][0]["text"] == "a"
-    meta = read_meta(store, "test")
+    assert read_lyrics("test")["segments"][0]["text"] == "a"
+    meta = read_meta("test")
     assert meta["pipeline"]["via"] == "gpu-service"
     assert meta["pipeline"]["models"] == "fake"
-    assert (store / "test" / "vocals.wav").is_file()
-    assert (store / "test" / "minus.wav").is_file()
-    assert not list(store.glob(".tmp-*"))
+    assert meta["source"]["file"] == "music/song.mp3"
+    assert meta["source"]["sha1"]  # посчитан по скачанному исходнику
+    assert minio.exists("songs/test/vocals.wav")
+    assert minio.exists("songs/test/minus.wav")
+    assert minio.exists("songs/test/meta.json")
+    assert not list(SCRATCH.glob("job-*"))  # скраб всегда убирается
 
 
-def test_run_job_video_passthrough(tmp_path):
-    """Видео едет на GPU-бокс как есть — демультиплекс там."""
+def test_run_job_video_passthrough():
+    """Конец на mp4 с GPU-сервиса возвращается как есть и ложится в store."""
     gpu = FakeGpu()
-    _run(tmp_path, gpu=gpu, title="Clip", src_name="clip.mp4")
+    _run(gpu=gpu, title="Clip", src_name="clip.mp4")
     assert gpu.submitted.suffix == ".mp4"
 
 
-def test_run_job_gpu_error(tmp_path):
+def test_run_job_gpu_error():
     class Dead:
         def submit_job(self, *a, **k):
             raise RuntimeError("GPU down")
 
-    registry, job, store, _ = _run(tmp_path, gpu=Dead())
+    registry, job, _ = _run(gpu=Dead())
     assert job.state == "error"
     assert "GPU down" in (job.error or "")
-    assert not list(store.glob(".tmp-*"))
+    assert not list(SCRATCH.glob("job-*"))
 
 
-def test_run_job_poll_timeout(tmp_path):
+def test_run_job_poll_timeout():
     class Never(FakeGpu):
         def job_status(self, _jid):
             return {"state": "running", "stage": "separation", "progress": 10}
 
-    registry, job, store, _ = _run(tmp_path, gpu=Never(),
-                                   poll_interval=0.001, timeout_sec=0.01)
+    registry, job, _ = _run(gpu=Never(), poll_interval=0.001, timeout_sec=0.01)
     assert job.state == "error"
     assert "не завершился" in (job.error or "")
-    assert not list(store.glob(".tmp-*"))
+    assert not list(SCRATCH.glob("job-*"))
 
 
-def test_run_job_rejects_foreign_bundle_files(tmp_path):
+def test_run_job_rejects_foreign_bundle_files():
     gpu = FakeGpu(bundle=_bundle({"evil.sh": "#!/bin/sh"}))
-    registry, job, store, _ = _run(tmp_path, gpu=gpu)
+    registry, job, _ = _run(gpu=gpu)
     assert job.state == "error"
     assert "посторонними" in (job.error or "")
-    assert not list(store.glob(".tmp-*"))
+    assert not list(SCRATCH.glob("job-*"))
 
 
-def test_run_job_rejects_oversized_bundle(tmp_path, monkeypatch):
+def test_run_job_rejects_oversized_bundle(monkeypatch):
     monkeypatch.setattr("karaoke_api.pipeline.MAX_BUNDLE_MB", 0)
-    registry, job, store, _ = _run(tmp_path)
+    registry, job, _ = _run()
     assert job.state == "error"
     assert "больше" in (job.error or "")
-    assert not list(store.glob(".tmp-*"))
+    assert not list(SCRATCH.glob("job-*"))
 
 
-def test_run_job_publish_failure_retries_then_error(tmp_path):
+def test_run_job_publish_failure_retries_then_error():
     calls = {"n": 0}
 
     def bad(sid):
         calls["n"] += 1
         raise RuntimeError("ffmpeg missing")
 
-    registry, job, store, _ = _run(tmp_path, publisher=bad)
+    registry, job, _ = _run(publisher=bad)
     assert calls["n"] == 2  # один повтор
     assert job.state == "error"
     assert "Сохранено, но публикация упала" in (job.error or "")
-    assert (store / "test").is_dir()  # сама песня в store осталась
+    assert read_meta("test")["id"] == "test"  # песня осталась в store
 
 
-def test_run_job_custom_text_to_gpu(tmp_path):
+def test_run_job_custom_text_to_gpu():
     gpu = FakeGpu()
-    _run(tmp_path, gpu=gpu, lyrics_text="мой текст")
+    _run(gpu=gpu, lyrics_text="мой текст")
     assert gpu.submitted_text == "мой текст"
 
 
-def test_run_job_fetches_lyrics_url(tmp_path):
+def test_run_job_fetches_lyrics_url():
     gpu = FakeGpu()
-    registry, job, store, _ = _run(tmp_path, gpu=gpu, lyrics_url="https://genius.com/x",
-                                   fetcher=lambda url: ["строка 1"])
+    registry, job, _ = _run(gpu=gpu, lyrics_url="https://genius.com/x",
+                            fetcher=lambda url: ["строка 1"])
     assert job.state == "done"
     assert gpu.submitted_text == "строка 1"
 
 
+def test_run_job_missing_source():
+    registry = JobRegistry(ttl_sec=60)
+    job = registry.create(title="X", audio="music/gone.mp3", lang="ru")
+    run_job(job, registry, gpu_factory=lambda url: FakeGpu(),
+            publisher=lambda sid: None, poll_interval=0.0, timeout_sec=5.0)
+    assert job.state == "error"
+    assert "не найден" in (job.error or "")
+
+
 def test_worker_submit_registers_job():
-    job = W.submit(title="X", audio=Path("x.mp3"))
+    job = W.submit(title="X", audio="music/x.mp3")
     try:
         assert W.registry.get(job.id) is job
         assert job.state == "queued"

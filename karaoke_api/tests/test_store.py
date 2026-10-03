@@ -1,8 +1,9 @@
-"""Хранилище data/songs: валидация, round-trip, история, манифест."""
+"""Канон хранилища (объекты songs/<id>/): валидация, round-trip, история, манифест."""
 import json
 
 import pytest
 
+from karaoke_api import minio
 from karaoke_api.store.songs import (
     all_ids,
     build_manifest,
@@ -10,26 +11,27 @@ from karaoke_api.store.songs import (
     read_lyrics,
     read_meta,
     save_lyrics,
+    song_key,
     unique_sid,
     validate_lyrics,
     write_meta,
 )
 
 
-def _song(store, sid="t", **kw):
-    meta = {"title": "Тест", "language": "ru", "duration": 100, **kw}
-    write_meta(store, sid, meta)
+def _song(sid="t", **kw):
+    meta = {"title": "Песня", "language": "ru", "duration": 100, **kw}
+    write_meta(sid, meta)
     return meta
 
 
 def test_validate_ok_and_sort():
     lang, segs, skips = validate_lyrics({
         "language": "ru",
-        "segments": [{"start": 0, "end": 1, "text": "а", "words": [{"w": "а", "s": 0, "e": 1}]}],
+        "segments": [{"start": 0, "end": 1, "text": "я", "words": [{"w": "я", "s": 0, "e": 1}]}],
         "skips": [{"s": 5, "e": 6}, {"s": 1, "e": 2}],
     })
     assert lang == "ru"
-    assert segs[0]["words"] == [{"w": "а", "s": 0.0, "e": 1.0}]
+    assert segs[0]["words"] == [{"w": "я", "s": 0.0, "e": 1.0}]
     assert skips == [{"s": 1.0, "e": 2.0}, {"s": 5.0, "e": 6.0}]
 
 
@@ -45,64 +47,68 @@ def test_validate_rejects():
         validate_lyrics("junk")
 
 
-def test_save_roundtrip_and_history(tmp_path):
-    store = tmp_path / "songs"
-    _song(store)
-    payload = {"language": "ru", "segments": [{"start": 0, "end": 1, "text": "а", "words": []}],
+def test_save_roundtrip_and_history():
+    _song()
+    payload = {"language": "ru", "segments": [{"start": 0, "end": 1, "text": "я", "words": []}],
                "skips": [{"s": 1, "e": 2}]}
-    save_lyrics(store, "t", payload)
-    assert read_lyrics(store, "t")["segments"][0]["text"] == "а"
-    assert read_lyrics(store, "t")["skips"] == [{"s": 1.0, "e": 2.0}]
-    assert read_meta(store, "t")["lines"] == 1
-    # второе сохранение — первое уезжает в историю
-    save_lyrics(store, "t", {**payload, "segments": [{"start": 0, "end": 2, "text": "б", "words": []}]})
-    hist = list((store / "t" / "history").glob("lyrics-*.json"))
+    save_lyrics("t", payload)
+    assert read_lyrics("t")["segments"][0]["text"] == "я"
+    assert read_lyrics("t")["skips"] == [{"s": 1.0, "e": 2.0}]
+    assert read_meta("t")["lines"] == 1
+    # после правки: старый текст остаётся в истории, новый — канон
+    save_lyrics("t", {**payload, "segments": [{"start": 0, "end": 2, "text": "ты", "words": []}]})
+    hist = [k for k in minio.list_keys("songs/t/history/")
+            if k.rsplit("/", 1)[-1].startswith("lyrics-")]
     assert len(hist) == 1
-    assert json.loads(hist[0].read_text(encoding="utf-8"))["segments"][0]["text"] == "а"
+    assert json.loads(minio.get(hist[0]))["segments"][0]["text"] == "я"
 
 
-def test_save_unknown_song(tmp_path):
+def test_save_history_pruned():
+    _song()
+    payload = {"language": "ru", "segments": [{"start": 0, "end": 1, "text": "x", "words": []}]}
+    for i in range(25):
+        payload = {"language": "ru",
+                   "segments": [{"start": 0, "end": 1, "text": f"v{i}", "words": []}]}
+        save_lyrics("t", payload)
+    hist = [k for k in minio.list_keys("songs/t/history/")
+            if k.rsplit("/", 1)[-1].startswith("lyrics-")]
+    assert len(hist) == 20  # HISTORY_KEEP
+
+
+def test_save_unknown_song():
     with pytest.raises(KeyError):
-        save_lyrics(tmp_path / "songs", "nope", {"segments": [{"start": 0, "end": 1, "text": "x"}]})
+        save_lyrics("nope", {"segments": [{"start": 0, "end": 1, "text": "x"}]})
 
 
-def test_sid_traversal_blocked(tmp_path):
-    store = tmp_path / "songs"
+def test_sid_traversal_blocked():
     with pytest.raises(ValueError):
-        save_lyrics(store, "..", {"segments": [{"start": 0, "end": 1, "text": "x"}]})
+        save_lyrics("..", {"segments": [{"start": 0, "end": 1, "text": "x"}]})
     with pytest.raises(ValueError):
-        read_meta(store, "../x")
+        read_meta("../x")
 
 
-def test_manifest(tmp_path):
-    store = tmp_path / "songs"
-    _song(store, "b", title="Б")
-    _song(store, "a", title="А")
-    assert all_ids(store) == ["a", "b"]
-    m = build_manifest(store)
-    assert [s["id"] for s in m["songs"]] == ["a", "b"]  # по алфавиту названий
-    e = manifest_entry(store, "a")
+def test_manifest():
+    _song("b", title="Яя")
+    _song("a", title="Аа")
+    assert all_ids() == ["a", "b"]
+    m = build_manifest()
+    assert [s["id"] for s in m["songs"]] == ["a", "b"]  # сортировка по названию
+    e = manifest_entry("a")
     assert e["audio"] == "songs/a/minus.mp3"
     assert e["original"] is None  # нет source
-    assert manifest_entry(store, "nope") is None
+    assert e["vocals"] is None  # нет vocals.wav
+    assert manifest_entry("nope") is None
 
 
-def _wav(path, seconds=1.0, sr=8000):
-    import array
-    import wave
-
-    n = int(seconds * sr)
-    with wave.open(str(path), "wb") as w:
-        w.setnchannels(1)
-        w.setsampwidth(2)
-        w.setframerate(sr)
-        w.writeframes(array.array("h", [0] * n).tobytes())
+def test_manifest_vocals_flag():
+    _song("a")
+    minio.put(song_key("a", "vocals.wav"), b"RIFF")
+    assert manifest_entry("a")["vocals"] == "songs/a/vocals.mp3"
 
 
-def test_unique_sid(tmp_path):
-    store = tmp_path / "songs"
-    assert unique_sid(store, "a") == "a"
-    _song(store, "a")
-    assert unique_sid(store, "a") == "a-2"
-    _song(store, "a-2")
-    assert unique_sid(store, "a") == "a-3"
+def test_unique_sid():
+    assert unique_sid("a") == "a"
+    _song("a")
+    assert unique_sid("a") == "a-2"
+    _song("a-2")
+    assert unique_sid("a") == "a-3"

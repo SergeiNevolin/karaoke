@@ -2,14 +2,19 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parent.parent
+DIST = ROOT / "web" / "dist"
+#: рабочая область на диске (бандлы пайплайна, ffmpeg, upload-буфер) — НЕ хранилище
+SCRATCH = ROOT / "data" / "scratch"
+
+#: легаси-каталоги исходной файловой системы; нужны только cli.migrate_storage
 MUSIC = ROOT / "music"
 STORE = ROOT / "data" / "songs"
 DATA_PUBLIC = ROOT / "data" / "public" / "songs"
-DIST = ROOT / "web" / "dist"
 
 # GPU-микросервис. Пусто — считаем локально на этой машине.
 KARAOKE_ML_SERVICE_URL = os.environ.get("KARAOKE_ML_SERVICE_URL", "http://127.0.0.1:8001").strip()
@@ -18,6 +23,13 @@ LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
 
 #: секрет JWT bebradio (HS256) для входа через /karaoke. Пусто — авторизация выключена.
 AUTH_JWT_SECRET = os.environ.get("AUTH_JWT_SECRET", "").strip()
+
+#: объектное хранилище (MinIO/S3); env-имена совпадают с music-service в bebradio
+S3_ENDPOINT_URL = os.environ.get("S3_ENDPOINT", "http://127.0.0.1:9000").strip()
+S3_ACCESS_KEY = os.environ.get("S3_ACCESS_KEY", "minioadmin").strip()
+S3_SECRET_KEY = os.environ.get("S3_SECRET_KEY", "minioadmin").strip()
+S3_BUCKET = os.environ.get("S3_BUCKET", "karaoke").strip()
+S3_REGION = os.environ.get("S3_REGION", "").strip()
 
 
 def _int_env(name: str, default: int) -> int:
@@ -45,6 +57,15 @@ def validate_config() -> None:
     if url.scheme not in ("http", "https") or not url.netloc:
         errors.append(
             f"KARAOKE_ML_SERVICE_URL={KARAOKE_ML_SERVICE_URL!r} — ждём http(s)://host[:port]")
+    if S3_ENDPOINT_URL:  # пусто — штатный AWS-эндпоинт boto3 (в т.ч. moto в тестах)
+        s3 = urlparse(S3_ENDPOINT_URL)
+        if s3.scheme not in ("http", "https") or not s3.netloc:
+            errors.append(f"S3_ENDPOINT={S3_ENDPOINT_URL!r} — ждём http(s)://host[:port]")
+    if not S3_ACCESS_KEY or not S3_SECRET_KEY:
+        errors.append("S3_ACCESS_KEY/S3_SECRET_KEY — не могут быть пустыми")
+    if not S3_BUCKET or len(S3_BUCKET) > 63 or not re.fullmatch(r"[a-z0-9][a-z0-9.-]*", S3_BUCKET):
+        errors.append(
+            f"S3_BUCKET={S3_BUCKET!r} — ждём бакет в нижнем регистре (a-z0-9.-, до 63)")
     if LOG_LEVEL not in {"CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG", "NOTSET"}:
         errors.append(f"LOG_LEVEL={LOG_LEVEL!r} — нет такого уровня")
     if errors:

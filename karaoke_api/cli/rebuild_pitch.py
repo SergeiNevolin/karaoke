@@ -1,29 +1,27 @@
-"""
-Перегон pitch.json песен через GPU-сервис (никакого torch здесь —
-только HTTP): vocals.wav из store -> /v1/pitch -> store + паблиш.
-Использование:
-    GPU_URL=http://gpu:8001 python -m karaoke_api.cli.rebuild_pitch [--only <song-id>]
+"""Пересборка pitch.json для песен без GPU-пайплайна (без torch — только HTTP).
 
-Проверяет voiced% и длину трека.
+vocals.wav из бакета -> /v1/pitch -> pitch.json в бакет + переопубликация.
+Запуск: GPU_URL=http://gpu:8001 python -m karaoke_api.cli.rebuild_pitch [--only <song-id>]
+
+Следите за voiced% — он не должен резко упасть.
 """
 from __future__ import annotations
 
 import argparse
-import json
 import sys
+import tempfile
 import time
+from pathlib import Path
 
-from karaoke_api.config import KARAOKE_ML_SERVICE_URL, STORE
+from karaoke_api import minio
+from karaoke_api.config import KARAOKE_ML_SERVICE_URL
 from karaoke_api.gpu_client import GpuClient
 from karaoke_api.store.publish import publish_one
-from karaoke_api.store.songs import all_ids
+from karaoke_api.store.songs import all_ids, song_key
 
 
-def _read_old_pitch(dest) -> dict:
-    try:
-        return json.loads(dest.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {"t": []}
+def _old_pitch(sid: str) -> dict:
+    return minio.get_json(song_key(sid, "pitch.json"), {"t": []}) or {"t": []}
 
 
 def main() -> None:
@@ -32,28 +30,29 @@ def main() -> None:
     args = ap.parse_args()
 
     if not KARAOKE_ML_SERVICE_URL:
-        sys.exit("[ERROR] нужен GPU_URL (перегон считает GPU-сервис)")
+        sys.exit("[ERROR] задайте KARAOKE_ML_SERVICE_URL (нужен поднятый GPU-сервис)")
     gpu = GpuClient(KARAOKE_ML_SERVICE_URL)
-    sids = all_ids(STORE)
+    sids = all_ids()
     if args.only:
         sids = [s for s in sids if s == args.only]
 
     ok, skipped, fails = 0, 0, []
     for sid in sids:
         t0 = time.time()
-        src = STORE / sid / "vocals.wav"
-        if not src.is_file():
-            print(f"[SKIP] {sid}: нет vocals.wav в store")
+        vocals_key = song_key(sid, "vocals.wav")
+        if minio.head(vocals_key) is None:
+            print(f"[SKIP] {sid}: нет vocals.wav в бакете")
             skipped += 1
             continue
-        dest = STORE / sid / "pitch.json"
-        old = _read_old_pitch(dest) if dest.exists() else {"t": []}
-        try:
-            data = gpu.pitch(src)
-        except Exception as e:  # noqa: BLE001
-            print(f"[WARN] {sid}: GPU pitch упал: {e}")
-            fails.append(sid)
-            continue
+        old = _old_pitch(sid)
+        with tempfile.TemporaryDirectory(prefix="rebuild-pitch-") as td:
+            src = minio.download(vocals_key, Path(td) / "vocals.wav")
+            try:
+                data = gpu.pitch(src)
+            except Exception as e:  # noqa: BLE001
+                print(f"[WARN] {sid}: GPU pitch упал: {e}")
+                fails.append(sid)
+                continue
         vv = sum(1 for m in data["midi"] if m is not None)
         cov = 100 * vv / max(1, len(data["midi"]))
         old_n = len(old.get("t", []))
@@ -63,11 +62,11 @@ def main() -> None:
         if not (ok_len and ok_cov):
             fails.append(sid)
         else:
-            dest.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+            minio.put_json(song_key(sid, "pitch.json"), data)
             try:
                 publish_one(sid)
             except Exception as e:  # noqa: BLE001
-                print(f"[WARN] {sid}: паблиш упал: {e}")
+                print(f"[WARN] {sid}: переопубликация упала: {e}")
                 fails.append(sid)
                 continue
             ok += 1

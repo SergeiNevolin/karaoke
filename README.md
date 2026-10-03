@@ -10,31 +10,35 @@
 music/track.mp3
    │  Demucs htdemucs/htdemucs_ft (CUDA, 5070 ~15-40с/трек)
    ▼
-output/<model>/<track>/{vocals.wav, no_vocals.wav}   # временное, GPU-шаги
+рабочая область data/scratch/job-<id>/            # временное, GPU-шаги
    │  faster-whisper large-v3 (CUDA fp16, word_timestamps) + CREPE (CUDA)
    ▼
-data/songs/<id>/          # КАНОН: meta, lyrics, pitch, waveform,
-                          # vocals.wav, minus.wav, cache/*.mp3, history/
-   │  export (паблиш)
+MinIO-бакет karaoke (S3):                         # КАНОН + паблиш
+  songs/<id>/     meta, lyrics, pitch, waveform,
+                  minus/original/vocals (.wav/.mp3), history/
+  music/          загруженные исходники
+   │  отдаётся
    ▼
 сервер отдаёт /api/* + /songs/*, фронт — web/dist
 ```
 
 Бэкенд — пакет `karaoke_api/`:
-- `karaoke_api/app.py` — `create_app()`: lifespan (старт/стоп воркера), хендлеры
-  ошибок (`{"error"}` + честный статус), отдача `web/dist`
-- `karaoke_api/api/` — роуты: `jobs.py` (upload стримом с лимитом, lyrics fetch
-  через threadpool), `songs.py` (каталог, GET/PUT lyrics)
+- `karaoke_api/app.py` — `create_app()`: lifespan (старт/стоп воркера,
+  гарантия бакета), хендлеры ошибок (`{"error"}` + честный статус), отдача `web/dist`
+- `karaoke_api/api/` — роуты: `jobs.py` (upload стримом в бакет с лимитом,
+  lyrics fetch через threadpool), `songs.py` (каталог, GET/PUT lyrics,
+  стриминг `/songs/...` с Range/ETag)
 - `karaoke_api/registry.py` — реестр задач (in-memory, TTL), `karaoke_api/worker.py` —
   очередь и фоновый поток
 - `karaoke_api/pipeline.py` — пайплайн задачи: опрос GPU, распаковка бандла
-  (whitelist 4 файлов, атомарная запись), публикация
+  (whitelist 4 файлов, атомарная запись), публикация в бакет
 - `karaoke_api/gpu_client.py` — HTTP-клиент GPU-микросервиса (ретраи с backoff)
-- `karaoke_api/store/` — хранилище `data/songs` (`songs.py` — атомарные записи,
-  `publish.py` — паблиш в `data/public`)
+- `karaoke_api/minio.py` — клиент объектного хранилища (boto3/MinIO, path-style)
+- `karaoke_api/store/` — логика хранения (`songs.py` — канон `songs/<id>/`,
+  `publish.py` — паблиш mp3/waveform поверх канона)
 - `karaoke_api/lyrics.py` — текстовые утилиты (Genius, SSRF-проверка; лёгкие,
   без GPU)
-- `karaoke_api/cli/` — `export`, `rebuild_pitch`, `fixtures`
+- `karaoke_api/cli/` — `migrate_storage`, `export`, `rebuild_pitch`, `fixtures`
 - `karaoke_api/config.py`, `errors.py`, `schemas.py`, `utils.py` — конфигурация
   и лимиты, `ApiError`, схемы Pydantic, общие утилиты
 
@@ -78,9 +82,11 @@ docker compose up --build   # http://localhost:8002
 - multi-stage образ (`karaoke_api/Dockerfile`): node:24 собирает фронт
   (tsc + vite), python:3.11-slim c ffmpeg отдаёт API/статику; non-root
   uid 10001, `HEALTHCHECK` по `GET /healthz` (эта точка авторизацию не спрашивает);
-- данные песен — `./data` (compose-маппинг), каталоги `data/songs` (канон)
-  и `data/public/songs` (публичный);
-- env: `AUTH_JWT_SECRET`, `KARAOKE_ML_SERVICE_URL`, `LOG_LEVEL`,
+- compose поднимает свой MinIO (порты 9100/9001, чтобы не пересекаться с
+  bebradio); `./data` в контейнере — рабочая область (scratch) и источник
+  разовой миграции: `docker compose run --rm karaoke-api python -m karaoke_api.cli.migrate_storage`;
+- env: `AUTH_JWT_SECRET`, `KARAOKE_ML_SERVICE_URL`, `S3_ENDPOINT`,
+  `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_BUCKET`, `LOG_LEVEL`,
   `MAX_UPLOAD_MB`, `MAX_BUNDLE_MB` — полный список с дефолтами в `.env.example`;
   невалидные значения отваливаются на старте (`validate_config`);
 - CI (`.github/workflows/ci.yml`): ruff + pytest лёгкого рантайма, веб-сборка
@@ -142,6 +148,29 @@ python -m uvicorn karaoke_api.app:app --port 8000
 Контракт GPU-микросервиса (400/404/413/429/500) — в
 `karaoke_ml_service/README.md`.
 
+## Хранилище (MinIO/S3)
+
+Все постоянные данные песен — в объектном хранилище, локальный диск только
+рабочая область (распаковка бандлов, ffmpeg, scratch воркера):
+
+| Что | Где |
+|---|---|
+| канон песни (meta/lyrics/pitch/waveform/wav/history) | бакет `S3_BUCKET`, `songs/<id>/...` |
+| опубликованные mp3 (`minus/original/vocals`) | там же, ключи `songs/<id>/...` (слиты с каноном) |
+| загруженные исходники | бакет, ключи `music/...` (`meta.source.file` = этот ключ) |
+| манифест каталога (`GET /api/songs`) | не хранится — собирается на лету из `meta.json` |
+| scratch воркера | `data/scratch/job-<id>/`, удаляется после задачи |
+
+- env: `S3_ENDPOINT` (пусто = штатный AWS boto3), `S3_ACCESS_KEY`,
+  `S3_SECRET_KEY`, `S3_BUCKET` (дефолт `karaoke`), `S3_REGION`;
+- публикация атомарна: `meta.json` заливается последним, без него песня
+  не видна в каталоге; сироты без `meta` чистятся перед установкой;
+- разовый перенос старого файлового layout (включая `music/`):
+  `python -m karaoke_api.cli.migrate_storage [--force]` (идемпотентно,
+  читает `DATA_PUBLIC`/`STORE`/`MUSIC` и заливает в бакет);
+- в bebradio используется его MinIO (бакет `karaoke`, env подставляет
+  compose-файл сервиса `karaoke-api`).
+
 ## Эксплуатация
 
 - **Один uvicorn-воркер**: `python -m uvicorn karaoke_api.app:app --port 8000` —
@@ -155,7 +184,8 @@ python -m uvicorn karaoke_api.app:app --port 8000
 ## Отдельные шаги
 
 ```powershell
-python -m karaoke_api.cli.export [--only <id>]   # паблиш data/songs -> серверу
+python -m karaoke_api.cli.migrate_storage [--force]  # перенос файлового layout в бакет (однократно)
+python -m karaoke_api.cli.export [--only <id>]       # переопубликовать mp3/waveform в бакете
 python -m karaoke_api.cli.rebuild_pitch [--only <id>]
 ```
 

@@ -1,53 +1,38 @@
-"""CLI публикации песен: data/songs/ -> data/public/songs/ + манифест.
+"""Переопубликация песен: канон songs/<id>/ -> те же mp3/JSON в бакете.
 
-Логика живёт в karaoke_api.store.publish (её же зовут API и воркер — без subprocess).
+Полезно после правки quality или ручной порчи mp3; манифест API собирает сам.
 
 Usage:
-    python -m karaoke_api.cli.export [--only <song-id>] [--quality N] [--out DIR]
+    python -m karaoke_api.cli.export [--only <song-id>] [--quality N]
 """
 from __future__ import annotations
 
 import argparse
 import logging
 import sys
-from pathlib import Path
 
-from karaoke_api.config import DATA_PUBLIC, STORE
-from karaoke_api.store.publish import (
-    log,
-    publish_song,
-    read_manifest,
-    select_sids,
-    write_manifest,
-)
+from karaoke_api.store.publish import log, publish_song, select_sids
 
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-    ap = argparse.ArgumentParser(description="Публикация data/songs -> data/public/songs")
-    ap.add_argument("--out", default=str(DATA_PUBLIC))
+    ap = argparse.ArgumentParser(description="переопубликация песен (mp3/JSON) в бакет")
     ap.add_argument("--quality", default="4", help="ffmpeg -q:a для mp3 (0..9, 4 ~= 165kbps)")
-    ap.add_argument("--only", default=None, help="только песня с таким id (или названием трека)")
+    ap.add_argument("--only", default=None, help="одна песня по id или по названию трека")
     a = ap.parse_args()
 
-    out_root = Path(a.out)
-    out_root.mkdir(parents=True, exist_ok=True)
-
-    sids = select_sids(a.only, STORE)
+    sids = select_sids(a.only)
     if not sids:
-        sys.exit("[ERROR] песен нет — сначала загрузите песню через интерфейс")
+        sys.exit("[ERROR] нет песен для публикации (бакет пуст?)")
 
-    # --only: перезаписываем одну строку, остальные сохраняем;
-    # полный прогон: манифест собирается заново из опубликованного.
-    entries = read_manifest(out_root) if a.only else []
+    done = 0
     for sid in sids:
-        entry = publish_song(sid, STORE / sid, out_root, a.quality, STORE)
+        entry = publish_song(sid, a.quality)
         if entry is None:
             continue
-        entries = [m for m in entries if m.get("id") != sid] + [entry]
+        done += 1
         log.info("%s (%sс)", entry["title"], entry.get("duration") or "?")
-    write_manifest(out_root, entries)
-    print(f"\n[DONE] песен: {len(entries)} -> {out_root / 'manifest.json'}")
+    print(f"\n[DONE] опубликовано: {done}")
 
 
 if __name__ == "__main__":

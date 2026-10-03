@@ -1,5 +1,5 @@
 """
-Каноническое хранилище песен: data/songs/<id>/ (файловая структура, без БД).
+Каноническое хранилище песен: объекты songs/<id>/ в MinIO (см. karaoke_api.minio).
 
 Раскладка песни:
   meta.json      id, title, language, duration, lines,
@@ -8,74 +8,79 @@
   lyrics.json    {language, segments, skips?} — канон текста и пропусков,
                  включая правки из редактора (через PUT /api/songs/<id>/lyrics)
   pitch.json     {t, midi, conf?} — эталон тона по вокалу
-  waveform.json  пики громкости вокала
+  waveform.json  пики громкости вокала (пишет publish)
   vocals.wav     изолированный вокал (Demucs)
   minus.wav      минус (no_vocals)
-  cache/         регенерируемые mp3 для плеера (minus/original/vocals)
+  minus.mp3      опубликованный минус для плеера (publish)
+  original.mp3   полная песня для редактора (publish)
+  vocals.mp3     запасной трек редактора (publish)
   history/       бэкапы lyrics.json при каждом сохранении (последние 20)
 
-Публикация в data/public/songs/ — дело karaoke_api.cli.export (читает отсюда).
+Всё это же пространство отдаётся наружу как /songs/<id>/...; каталог
+music/ в бакете хранит загруженные исходники (meta.source.file).
 """
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
 import math
 import re
 from datetime import datetime
-from pathlib import Path
 
-from karaoke_api.utils import atomic_write_json, now_iso
+from karaoke_api import minio
+from karaoke_api.utils import now_iso
 
 HISTORY_KEEP = 20
+
+SONGS = "songs/"
 
 log = logging.getLogger(__name__)
 
 
-def song_dir(store: Path, sid: str) -> Path:
+def song_prefix(sid: str) -> str:
+    """Префикс песни; заодно крыса и path traversal отсекаются."""
     if not re.fullmatch(r"[a-z0-9][a-z0-9\-]*", sid or ""):
         raise ValueError(f"плохой id песни: {sid!r}")
-    return store / sid
+    return f"{SONGS}{sid}/"
 
 
-def all_ids(store: Path) -> list[str]:
-    """id песен: каталоги с meta.json, по алфавиту для стабильности."""
-    if not store.is_dir():
-        return []
-    return sorted(p.name for p in store.iterdir() if p.is_dir() and (p / "meta.json").is_file())
+def song_key(sid: str, name: str) -> str:
+    return f"{song_prefix(sid)}{name}"
 
 
-def _read_json(path: Path, default=None):
-    """Читать канон честно: отсутствие файла — default, порча — в лог."""
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        return default
-    except (OSError, json.JSONDecodeError) as e:
-        log.warning("не прочитали %s: %s", path, e)
-        return default
+def all_ids() -> list[str]:
+    """id песен: префиксы с meta.json, по алфавиту для стабильности."""
+    ids = set()
+    for key in minio.list_keys(SONGS):
+        rest = key[len(SONGS):]
+        sid, _, name = rest.partition("/")
+        if name == "meta.json" and re.fullmatch(r"[a-z0-9][a-z0-9\-]*", sid):
+            ids.add(sid)
+    return sorted(ids)
 
 
-def write_json(path: Path, data: dict) -> None:
-    """Атомарная запись канона (см. karaoke_api.utils.atomic_write_json)."""
-    atomic_write_json(path, data)
+def read_json(key: str, default=None):
+    """Читать канон честно: отсутствие объекта — default, порча — в лог."""
+    return minio.get_json(key, default)
 
 
-def read_meta(store: Path, sid: str) -> dict:
-    return _read_json(song_dir(store, sid) / "meta.json", {}) or {}
+def write_json(key: str, data: dict) -> None:
+    """Запись канона: один PUT — в MinIO он атомарен."""
+    minio.put_json(key, data)
 
 
-def write_meta(store: Path, sid: str, meta: dict) -> dict:
-    d = song_dir(store, sid)
-    d.mkdir(parents=True, exist_ok=True)
+def read_meta(sid: str) -> dict:
+    return read_json(song_key(sid, "meta.json"), {}) or {}
+
+
+def write_meta(sid: str, meta: dict) -> dict:
     meta = {**meta, "id": sid}
-    write_json(d / "meta.json", meta)
+    write_json(song_key(sid, "meta.json"), meta)
     return meta
 
 
-def read_lyrics(store: Path, sid: str) -> dict | None:
-    return _read_json(song_dir(store, sid) / "lyrics.json")
+def read_lyrics(sid: str) -> dict | None:
+    return read_json(song_key(sid, "lyrics.json"))
 
 
 def validate_lyrics(data: dict) -> tuple[str | None, list, list]:
@@ -122,36 +127,35 @@ def validate_lyrics(data: dict) -> tuple[str | None, list, list]:
     return language, clean_segs, skips
 
 
-def save_lyrics(store: Path, sid: str, data: dict) -> dict:
+def save_lyrics(sid: str, data: dict) -> dict:
     """Проверить, забэкапить, записать, обновить meta. Возвращает записанное."""
     language, segments, skips = validate_lyrics(data)
-    d = song_dir(store, sid)
-    if not d.is_dir():
+    if not read_meta(sid):
         raise KeyError(f"нет песни {sid}")
     payload = {"language": language, "segments": segments}
     if skips:
         payload["skips"] = skips
-    cur = d / "lyrics.json"
-    if cur.is_file():
-        hist = d / "history"
-        hist.mkdir(exist_ok=True)
+    cur_key = song_key(sid, "lyrics.json")
+    cur = minio.get(cur_key)
+    if cur is not None:
         ts = datetime.now().strftime("%Y%m%d-%H%M%S-%f")  # микросекунды: быстрые PUT не коллидируют
-        (hist / f"lyrics-{ts}.json").write_bytes(cur.read_bytes())
-        olds = sorted(hist.glob("lyrics-*.json"))
+        hist_prefix = f"{song_prefix(sid)}history/"
+        minio.put(f"{hist_prefix}lyrics-{ts}.json", cur, "application/json")
+        olds = sorted(k for k in minio.list_keys(hist_prefix)
+                      if k.rsplit("/", 1)[-1].startswith("lyrics-"))
         for stale in olds[:-HISTORY_KEEP]:
-            stale.unlink(missing_ok=True)
-    write_json(cur, payload)
-    meta = read_meta(store, sid)
+            minio.delete(stale)
+    write_json(cur_key, payload)
+    meta = read_meta(sid)
     meta["lines"] = len(segments)
     meta["updated"] = now_iso()
-    write_meta(store, sid, meta)
+    write_meta(sid, meta)
     return payload
 
 
-def manifest_entry(store: Path, sid: str) -> dict | None:
+def manifest_entry(sid: str) -> dict | None:
     """Строка каталога для фронта (public-имена файлов)."""
-    d = song_dir(store, sid)
-    meta = read_meta(store, sid)
+    meta = read_meta(sid)
     if not meta:
         return None
     has_source = bool(meta.get("source", {}).get("file"))
@@ -160,24 +164,24 @@ def manifest_entry(store: Path, sid: str) -> dict | None:
         "title": meta.get("title", sid),
         "audio": f"songs/{sid}/minus.mp3",
         "original": f"songs/{sid}/original.mp3" if has_source else None,
-        "vocals": f"songs/{sid}/vocals.mp3" if (d / "vocals.wav").is_file() else None,
+        "vocals": f"songs/{sid}/vocals.mp3" if minio.exists(song_key(sid, "vocals.wav")) else None,
         "language": meta.get("language"),
         "lines": meta.get("lines", 0),
         "duration": meta.get("duration", 0),
     }
 
 
-def build_manifest(store: Path) -> dict:
+def build_manifest() -> dict:
     songs = []
-    for sid in all_ids(store):
-        e = manifest_entry(store, sid)
+    for sid in all_ids():
+        e = manifest_entry(sid)
         if e:
             songs.append(e)
     songs.sort(key=lambda s: str(s.get("title", s["id"])).lower())
     return {"songs": songs}
 
 
-def sha1_of(path: Path) -> str:
+def sha1_of(path) -> str:
     h = hashlib.sha1()
     with open(path, "rb") as f:
         for chunk in iter(lambda: f.read(1 << 20), b""):
@@ -185,9 +189,9 @@ def sha1_of(path: Path) -> str:
     return h.hexdigest()
 
 
-def unique_sid(store: Path, want: str) -> str:
+def unique_sid(want: str) -> str:
     """Свободный id: want, want-2, want-3..."""
-    taken = set(all_ids(store))
+    taken = set(all_ids())
     if want not in taken:
         return want
     n = 2
@@ -196,7 +200,7 @@ def unique_sid(store: Path, want: str) -> str:
     return f"{want}-{n}"
 
 
-def wav_seconds(path: Path) -> float:
+def wav_seconds(path) -> float:
     try:
         import wave
         with wave.open(str(path), "rb") as w:

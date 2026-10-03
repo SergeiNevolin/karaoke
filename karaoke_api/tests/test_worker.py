@@ -1,11 +1,9 @@
 """Очередь: submit регистрирует задачу, фоновый поток поднимается и останавливается."""
-from pathlib import Path
-
 import karaoke_api.worker as W
 
 
 def test_submit_registers_queued_job():
-    job = W.submit(title="X", audio=Path("x.mp3"))
+    job = W.submit(title="X", audio="music/x.mp3")
     try:
         assert W.registry.get(job.id) is job
         assert job.state == "queued"

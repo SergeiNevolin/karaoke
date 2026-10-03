@@ -7,7 +7,7 @@ import shutil
 import threading
 
 from . import pipeline
-from .config import JOB_TTL_SEC, STORE
+from .config import JOB_TTL_SEC, SCRATCH
 from .registry import Job, JobRegistry
 
 log = logging.getLogger(__name__)
@@ -62,7 +62,8 @@ def _consume() -> None:
 
 
 def _clean_tmp() -> None:
-    if not STORE.exists():
+    """Собрать застрявшие каталоги задач (скраб не переживает рестарты)."""
+    if not SCRATCH.is_dir():
         return
-    for p in STORE.glob(".tmp-*"):
+    for p in SCRATCH.glob("job-*"):
         shutil.rmtree(p, ignore_errors=True)

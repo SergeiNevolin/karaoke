@@ -1,7 +1,8 @@
 """
 Караоке-бэкенд: приём песен через интерфейс + GPU-пайплайн в фоне.
 
-Канон данных — data/songs/<id>/ (см. karaoke_api.store.songs).
+Канон данных — объекты songs/<id>/ в MinIO (см. karaoke_api.minio);
+/songs/* отдаётся из бакета с Range, локальный диск — только рабочая область.
 Роуты — karaoke_api.api.*, очередь — karaoke_api.worker.
 
 Запуск:
@@ -16,11 +17,11 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from . import worker
+from . import minio, worker
 from .api import jobs as jobs_routes
 from .api import songs as songs_routes
 from .auth import install_auth
-from .config import DATA_PUBLIC, DIST, LOG_LEVEL, validate_config
+from .config import DIST, LOG_LEVEL, validate_config
 from .errors import install_error_handlers
 
 log = logging.getLogger(__name__)
@@ -28,6 +29,7 @@ log = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    minio.ensure_bucket()  # MinIO не поднялся — умираем на старте, а не в рантайме
     worker.start()
     try:
         yield
@@ -61,10 +63,8 @@ def create_app() -> FastAPI:
                      (time.perf_counter() - start) * 1000)
         return response
 
-    # volume на первом старте может быть пустым: монтируем всегда, иначе
-    # статика песен «повиснет» до рестарта контейнера
-    DATA_PUBLIC.mkdir(parents=True, exist_ok=True)
-    application.mount("/songs", StaticFiles(directory=str(DATA_PUBLIC)), name="songs")
+    # статика песен — роут /songs/* в api.songs (бакет + Range);
+    # SPA-сборка лежит в образе и отдаётся как есть
     if DIST.exists():
         application.mount("/", StaticFiles(directory=str(DIST), html=True), name="front")
     return application

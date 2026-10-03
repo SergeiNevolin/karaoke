@@ -5,16 +5,15 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass, field
-from pathlib import Path
 
 
 @dataclass
 class Job:
-    """Одна задача пайплайна (state: queued | running | done | error)."""
+    """Состояние одной загрузки (state: queued | running | done | error)."""
 
     id: str
     title: str
-    audio: Path
+    audio: str  # ключ исходника в бакете (music/<файл>) либо локальный путь
     lang: str = "ru"
     lyrics_text: str = ""
     lyrics_url: str = ""
@@ -47,7 +46,7 @@ class JobRegistry:
         self._lock = threading.Lock()
         self._jobs: dict[str, Job] = {}
 
-    def create(self, *, title: str, audio: Path, lang: str = "ru",
+    def create(self, *, title: str, audio: str, lang: str = "ru",
                lyrics_text: str = "", lyrics_url: str = "") -> Job:
         job = Job(id=uuid.uuid4().hex[:12], title=title, audio=audio, lang=lang,
                   lyrics_text=lyrics_text, lyrics_url=lyrics_url)

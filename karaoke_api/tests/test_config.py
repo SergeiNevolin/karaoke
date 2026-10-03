@@ -15,6 +15,13 @@ def test_valid_defaults_pass():
     ("KARAOKE_ML_SERVICE_URL", "ftp://gpu", "KARAOKE_ML_SERVICE_URL"),
     ("KARAOKE_ML_SERVICE_URL", "", "KARAOKE_ML_SERVICE_URL"),
     ("LOG_LEVEL", "INFO2", "LOG_LEVEL"),
+    ("S3_ENDPOINT_URL", "minio:9000", "S3_ENDPOINT"),
+    ("S3_ENDPOINT_URL", "ftp://minio", "S3_ENDPOINT"),
+    ("S3_ACCESS_KEY", "", "S3_ACCESS_KEY"),
+    ("S3_SECRET_KEY", "", "S3_SECRET_KEY"),
+    ("S3_BUCKET", "", "S3_BUCKET"),
+    ("S3_BUCKET", "BíG Bucket", "S3_BUCKET"),
+    ("S3_BUCKET", "a" * 64, "S3_BUCKET"),
 ])
 def test_bad_config_rejected(monkeypatch, attr, value, piece):
     monkeypatch.setattr(config, attr, value)

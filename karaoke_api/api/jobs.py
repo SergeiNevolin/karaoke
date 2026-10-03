@@ -1,12 +1,14 @@
 """Загрузка песен и статусы задач."""
 from __future__ import annotations
 
+import os
+import tempfile
 from pathlib import Path
 
 from fastapi import APIRouter, File, Form, UploadFile
 from starlette.concurrency import run_in_threadpool
 
-from .. import worker
+from .. import minio, worker
 from ..config import (
     ALLOWED_EXT,
     ALLOWED_LANG,
@@ -14,15 +16,26 @@ from ..config import (
     MAX_LYRICS_TEXT,
     MAX_LYRICS_URL,
     MAX_UPLOAD_MB,
-    MUSIC,
+    SCRATCH,
     STAGE_LABELS,
 )
 from ..errors import ApiError
-from ..utils import slug, unique_path
+from ..utils import slug
 
 router = APIRouter()
 
 CHUNK = 1024 * 1024
+
+
+def _unique_music_key(stem: str, ext: str) -> tuple[str, int]:
+    """Свободный ключ исходника: music/stem, music/stem-2, music/stem-3..."""
+    taken = set(minio.list_keys("music/"))
+    variant = 1
+    key = f"music/{stem}{ext}"
+    while key in taken:
+        variant += 1
+        key = f"music/{stem}-{variant}{ext}"
+    return key, variant
 
 
 @router.post("/api/upload")
@@ -39,29 +52,37 @@ async def upload(
         lang = "ru"
 
     title = Path(file.filename or "song").stem.strip() or "Без названия"
-    MUSIC.mkdir(parents=True, exist_ok=True)
-    dest, variant = unique_path(MUSIC, slug(title), ext)
-    if variant > 1:
-        title = f"{title} ({variant})"
 
+    SCRATCH.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(dir=str(SCRATCH), prefix="upload-", suffix=ext)
     total = 0
     limit = MAX_UPLOAD_MB * 1024 * 1024
     try:
-        with open(dest, "wb") as out:
+        with os.fdopen(fd, "wb") as out:
             while chunk := await file.read(CHUNK):
                 total += len(chunk)
                 if total > limit:
                     raise ApiError(413, f"Файл больше {MAX_UPLOAD_MB} МБ")
                 out.write(chunk)
+        if total == 0:
+            raise ApiError(400, "Пустой файл")
     except ApiError:
-        dest.unlink(missing_ok=True)
+        os.unlink(tmp_name)
         raise
-    if total == 0:
-        dest.unlink(missing_ok=True)
-        raise ApiError(400, "Пустой файл")
+    except BaseException:
+        os.unlink(tmp_name)
+        raise
+
+    key, variant = await run_in_threadpool(_unique_music_key, slug(title), ext)
+    if variant > 1:
+        title = f"{title} ({variant})"
+    try:
+        await run_in_threadpool(minio.put_file, key, Path(tmp_name))
+    finally:
+        os.unlink(tmp_name)
 
     job = worker.submit(
-        title=title, audio=dest, lang=lang,
+        title=title, audio=key, lang=lang,
         lyrics_text=lyrics_text[:MAX_LYRICS_TEXT], lyrics_url=lyrics_url[:MAX_LYRICS_URL],
     )
     return {"jobId": job.id}
