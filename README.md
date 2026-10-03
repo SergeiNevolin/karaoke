@@ -13,7 +13,7 @@ music/track.mp3
 рабочая область data/scratch/job-<id>/            # временное, GPU-шаги
    │  faster-whisper large-v3 (CUDA fp16, word_timestamps) + CREPE (CUDA)
    ▼
-MinIO-бакет karaoke (S3):                         # КАНОН + паблиш
+Silo-бакет karaoke (S3):                          # КАНОН + паблиш
   songs/<id>/     meta, lyrics, pitch, waveform,
                   minus/original/vocals (.wav/.mp3), history/
   music/          загруженные исходники
@@ -33,7 +33,7 @@ MinIO-бакет karaoke (S3):                         # КАНОН + пабли
 - `karaoke_api/pipeline.py` — пайплайн задачи: опрос GPU, распаковка бандла
   (whitelist 4 файлов, атомарная запись), публикация в бакет
 - `karaoke_api/gpu_client.py` — HTTP-клиент GPU-микросервиса (ретраи с backoff)
-- `karaoke_api/minio.py` — клиент объектного хранилища (boto3/MinIO, path-style)
+- `karaoke_api/silo.py` — клиент объектного хранилища (boto3/Silo, path-style)
 - `karaoke_api/store/` — логика хранения (`songs.py` — канон `songs/<id>/`,
   `publish.py` — паблиш mp3/waveform поверх канона)
 - `karaoke_api/lyrics.py` — текстовые утилиты (Genius, SSRF-проверка; лёгкие,
@@ -83,7 +83,7 @@ docker compose up --build   # http://localhost:8002
   (tsc + vite), python:3.11-slim без ffmpeg (mp3 кодирует GPU-сервис)
   отдаёт API/статику; non-root
   uid 10001, `HEALTHCHECK` по `GET /healthz` (эта точка авторизацию не спрашивает);
-- compose поднимает свой MinIO (порты 9100/9001, чтобы не пересекаться с
+- compose поднимает свой Silo (порты 9100/9001, чтобы не пересекаться с
   bebradio); `./data` в контейнере — рабочая область (scratch) и источник
   разовой миграции: `docker compose run --rm karaoke-service python -m karaoke_api.cli.migrate_storage`;
 - env: `AUTH_JWT_SECRET`, `KARAOKE_ML_SERVICE_URL`, `S3_ENDPOINT`,
@@ -149,7 +149,10 @@ python -m uvicorn karaoke_api.app:app --port 8000
 Контракт GPU-микросервиса (400/404/413/429/500) — в
 `karaoke_ml_service/README.md`.
 
-## Хранилище (MinIO/S3)
+## Хранилище (Silo/S3)
+
+Silo — community-форк MinIO: тот же S3 API, env-имена `MINIO_*` и on-disk
+формат.
 
 Все постоянные данные песен — в объектном хранилище, локальный диск только
 рабочая область (распаковка бандлов, scratch воркера):
@@ -169,7 +172,7 @@ python -m uvicorn karaoke_api.app:app --port 8000
 - разовый перенос старого файлового layout (включая `music/`):
   `python -m karaoke_api.cli.migrate_storage [--force]` (идемпотентно,
   читает `DATA_PUBLIC`/`STORE`/`MUSIC` и заливает в бакет);
-- в bebradio используется его MinIO (бакет `karaoke`, env подставляет
+- в bebradio используется его Silo (бакет `karaoke`, env подставляет
   compose-файл сервиса `karaoke-service`).
 
 ## Эксплуатация

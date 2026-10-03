@@ -6,7 +6,7 @@ import karaoke_api.api.jobs as api_jobs
 import karaoke_api.api.songs as api_songs
 import karaoke_api.app as app_module
 import karaoke_api.worker as worker_mod
-from karaoke_api import minio
+from karaoke_api import silo
 from karaoke_api.registry import Job
 from karaoke_api.store.songs import save_lyrics, write_meta
 
@@ -84,7 +84,7 @@ def test_lyrics_put_publish_fail_still_ok(client, monkeypatch):
 
 
 def test_static_full_and_range(client):
-    minio.put("songs/t/minus.mp3", b"0123456789")
+    silo.put("songs/t/minus.mp3", b"0123456789")
     r = client.get("/songs/t/minus.mp3")
     assert r.status_code == 200
     assert r.content == b"0123456789"
@@ -101,7 +101,7 @@ def test_static_missing_404(client):
 
 
 def test_static_bad_range_416(client):
-    minio.put("songs/t/minus.mp3", b"0123456789")
+    silo.put("songs/t/minus.mp3", b"0123456789")
     r = client.get("/songs/t/minus.mp3", headers={"Range": "bytes=99-199"})
     assert r.status_code == 416
 
@@ -129,14 +129,14 @@ def test_upload_too_large_413(client, monkeypatch):
     r = client.post("/api/upload", files={"file": ("a.mp3", b"xx")})
     assert r.status_code == 413
     assert "error" in r.json()
-    assert not minio.list_keys("music/")  # объект не должен залиться
+    assert not silo.list_keys("music/")  # объект не должен залиться
 
 
 def test_upload_empty_file_400(client):
     r = client.post("/api/upload", files={"file": ("a.mp3", b"")})
     assert r.status_code == 400
     assert "error" in r.json()
-    assert not minio.list_keys("music/")  # объект не должен залиться
+    assert not silo.list_keys("music/")  # объект не должен залиться
 
 
 def test_upload_ok(client, monkeypatch):
@@ -152,7 +152,7 @@ def test_upload_ok(client, monkeypatch):
     assert r.json() == {"jobId": "job1"}
     assert seen["lang"] == "en"
     assert seen["audio"] == "music/pesnya.mp3"  # ключ в бакете, slug имени файла
-    assert minio.get(seen["audio"]) == b"AAA"
+    assert silo.get(seen["audio"]) == b"AAA"
 
 
 def test_upload_unique_keys(client, monkeypatch):

@@ -1,5 +1,5 @@
 """
-Каноническое хранилище песен: объекты songs/<id>/ в MinIO (см. karaoke_api.minio).
+Каноническое хранилище песен: объекты songs/<id>/ в Silo (см. karaoke_api.silo).
 
 Раскладка песни:
   meta.json      id, title, language, duration, lines,
@@ -27,7 +27,7 @@ import math
 import re
 from datetime import datetime
 
-from karaoke_api import minio
+from karaoke_api import silo
 from karaoke_api.utils import now_iso
 
 HISTORY_KEEP = 20
@@ -51,7 +51,7 @@ def song_key(sid: str, name: str) -> str:
 def all_ids() -> list[str]:
     """id песен: префиксы с meta.json, по алфавиту для стабильности."""
     ids = set()
-    for key in minio.list_keys(SONGS):
+    for key in silo.list_keys(SONGS):
         rest = key[len(SONGS):]
         sid, _, name = rest.partition("/")
         if name == "meta.json" and re.fullmatch(r"[a-z0-9][a-z0-9\-]*", sid):
@@ -61,12 +61,12 @@ def all_ids() -> list[str]:
 
 def read_json(key: str, default=None):
     """Читать канон честно: отсутствие объекта — default, порча — в лог."""
-    return minio.get_json(key, default)
+    return silo.get_json(key, default)
 
 
 def write_json(key: str, data: dict) -> None:
-    """Запись канона: один PUT — в MinIO он атомарен."""
-    minio.put_json(key, data)
+    """Запись канона: один PUT — в Silo он атомарен."""
+    silo.put_json(key, data)
 
 
 def read_meta(sid: str) -> dict:
@@ -136,15 +136,15 @@ def save_lyrics(sid: str, data: dict) -> dict:
     if skips:
         payload["skips"] = skips
     cur_key = song_key(sid, "lyrics.json")
-    cur = minio.get(cur_key)
+    cur = silo.get(cur_key)
     if cur is not None:
         ts = datetime.now().strftime("%Y%m%d-%H%M%S-%f")  # микросекунды: быстрые PUT не коллидируют
         hist_prefix = f"{song_prefix(sid)}history/"
-        minio.put(f"{hist_prefix}lyrics-{ts}.json", cur, "application/json")
-        olds = sorted(k for k in minio.list_keys(hist_prefix)
+        silo.put(f"{hist_prefix}lyrics-{ts}.json", cur, "application/json")
+        olds = sorted(k for k in silo.list_keys(hist_prefix)
                       if k.rsplit("/", 1)[-1].startswith("lyrics-"))
         for stale in olds[:-HISTORY_KEEP]:
-            minio.delete(stale)
+            silo.delete(stale)
     write_json(cur_key, payload)
     meta = read_meta(sid)
     meta["lines"] = len(segments)
@@ -166,8 +166,8 @@ def manifest_entry(sid: str) -> dict | None:
         "id": sid,
         "title": meta.get("title", sid),
         "audio": f"songs/{sid}/minus.mp3",
-        "original": f"songs/{sid}/original.mp3" if minio.exists(song_key(sid, "original.mp3")) else None,
-        "vocals": f"songs/{sid}/vocals.mp3" if minio.exists(song_key(sid, "vocals.mp3")) else None,
+        "original": f"songs/{sid}/original.mp3" if silo.exists(song_key(sid, "original.mp3")) else None,
+        "vocals": f"songs/{sid}/vocals.mp3" if silo.exists(song_key(sid, "vocals.mp3")) else None,
         "language": meta.get("language"),
         "lines": meta.get("lines", 0),
         "duration": meta.get("duration", 0),

@@ -9,7 +9,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from starlette.concurrency import run_in_threadpool
 
-from .. import minio
+from .. import silo
 from ..errors import ApiError
 from ..schemas import LyricsPut
 from ..store.publish import publish_one
@@ -64,14 +64,14 @@ async def song_static(rel: str, request: Request):
     key = f"songs/{rel}"
 
     if request.method == "HEAD":
-        h = await run_in_threadpool(minio.head, key)
+        h = await run_in_threadpool(silo.head, key)
         if h is None:
             return _NOT_FOUND
         return Response(status_code=200, headers=_base_headers(rel, h))
 
     try:
-        obj = await run_in_threadpool(minio.open_stream, key, request.headers.get("range"))
-    except minio.InvalidRange as e:
+        obj = await run_in_threadpool(silo.open_stream, key, request.headers.get("range"))
+    except silo.InvalidRange as e:
         return Response(status_code=416, headers={
             "Content-Range": f"bytes */{e.size}",
             "Accept-Ranges": "bytes",

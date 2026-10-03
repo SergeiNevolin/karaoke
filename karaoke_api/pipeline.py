@@ -1,6 +1,6 @@
 """Пайплайн задачи: сабмит в GPU, поллинг с дедлайном, безопасная распаковка бандла, store, публикация.
 
-Хранилище — объекты MinIO; локальный диск только как рабочая область (scratch),
+Хранилище — объекты Silo; локальный диск только как рабочая область (scratch),
 каталог задачи удаляется всегда — и при успехе, и при падении.
 """
 from __future__ import annotations
@@ -14,7 +14,7 @@ import zipfile
 from contextlib import contextmanager
 from pathlib import Path
 
-from . import minio
+from . import silo
 from .config import JOB_TIMEOUT_SEC, KARAOKE_ML_SERVICE_URL, MAX_BUNDLE_MB, POLL_INTERVAL_SEC, SCRATCH
 from .gpu_client import GpuClient, GpuError
 from .registry import Job, JobRegistry
@@ -93,9 +93,9 @@ def _poll(gpu, remote_id: str, job: Job, registry: JobRegistry,
 def _source_file(src, scratch: Path):
     """Исходник для GPU: объект из бакета -> scratch, либо уже лежащий на диске."""
     key = str(src)
-    if minio.exists(key):
+    if silo.exists(key):
         local = scratch / "source" / key.rsplit("/", 1)[-1]
-        minio.download(key, local)
+        silo.download(key, local)
         yield local
     elif Path(src).is_file():
         yield Path(src)
@@ -120,15 +120,15 @@ def _install(job: Job, raw: bytes, *, scratch: Path, gpu, publisher,
 
         sid = unique_sid(slug(job.title))
         prefix = song_prefix(sid)
-        if minio.list_keys(prefix):
+        if silo.list_keys(prefix):
             # sid свободен по meta.json, но объекты уже есть — сироты без метаданных
-            minio.delete_prefix(prefix)
+            silo.delete_prefix(prefix)
         meta = _meta_for(job, sid, language, len(segments), now_iso(), gpu,
                          bdir / "minus.wav", source_sha1)
         for f in sorted(bdir.iterdir()):
             if f.is_file():
-                minio.put_file(song_key(sid, f.name), f)
-        minio.put_json(song_key(sid, "meta.json"), meta)  # последним: песня появляется целиком
+                silo.put_file(song_key(sid, f.name), f)
+        silo.put_json(song_key(sid, "meta.json"), meta)  # последним: песня появляется целиком
     except BaseException:
         _rmtree(bdir)
         raise

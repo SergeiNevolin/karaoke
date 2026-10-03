@@ -24,10 +24,10 @@ LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
 #: секрет JWT bebradio (HS256) для входа через /karaoke. Пусто — авторизация выключена.
 AUTH_JWT_SECRET = os.environ.get("AUTH_JWT_SECRET", "").strip()
 
-#: объектное хранилище (MinIO/S3); env-имена совпадают с music-service в bebradio
+#: объектное хранилище (Silo/S3); env-имена совпадают с music-service в bebradio
 S3_ENDPOINT_URL = os.environ.get("S3_ENDPOINT", "http://127.0.0.1:9000").strip()
-S3_ACCESS_KEY = os.environ.get("S3_ACCESS_KEY", "minioadmin").strip()
-S3_SECRET_KEY = os.environ.get("S3_SECRET_KEY", "minioadmin").strip()
+S3_ACCESS_KEY = os.environ.get("S3_ACCESS_KEY", "siloadmin").strip()
+S3_SECRET_KEY = os.environ.get("S3_SECRET_KEY", "siloadmin").strip()
 S3_BUCKET = os.environ.get("S3_BUCKET", "karaoke").strip()
 S3_REGION = os.environ.get("S3_REGION", "").strip()
 

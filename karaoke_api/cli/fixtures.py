@@ -11,7 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 
-from karaoke_api import minio
+from karaoke_api import silo
 from karaoke_api.config import ROOT
 
 CADENCE = 0.12
@@ -24,7 +24,7 @@ def midi_to_hz(m: float) -> float:
 
 def build_fixture(song: str) -> dict:
     """Сэмпллировать pitch.json песни с каденцией живого цикла."""
-    raw = minio.get(f"songs/{song}/pitch.json")
+    raw = silo.get(f"songs/{song}/pitch.json")
     if raw is None:
         raise FileNotFoundError(f"в бакете нет songs/{song}/pitch.json")
     pitch = json.loads(raw.decode("utf-8"))

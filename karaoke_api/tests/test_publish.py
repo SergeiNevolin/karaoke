@@ -4,7 +4,7 @@ from __future__ import annotations
 import array
 import wave
 
-from karaoke_api import minio
+from karaoke_api import silo
 from karaoke_api.store.publish import publish_song
 from karaoke_api.store.songs import read_meta, song_key, write_meta
 
@@ -26,8 +26,8 @@ def _song(sid: str = "t", *, mp3: bool = True) -> None:
                      "source": {"file": "music/x.mp3"}})
     if mp3:
         for name in ("minus.mp3", "vocals.mp3", "original.mp3"):
-            minio.put(song_key(sid, name), b"ID3fake")
-    minio.put(song_key(sid, "vocals.wav"), _wav_bytes())
+            silo.put(song_key(sid, name), b"ID3fake")
+    silo.put(song_key(sid, "vocals.wav"), _wav_bytes())
 
 
 def test_publish_happy_without_ffmpeg():
@@ -37,8 +37,8 @@ def test_publish_happy_without_ffmpeg():
     assert entry["original"] == "songs/t/original.mp3"
     assert entry["vocals"] == "songs/t/vocals.mp3"
     assert entry["duration"] == 0.5
-    assert minio.exists("songs/t/waveform.json")   # посчитан из vocals.wav
-    assert minio.exists("songs/t/pitch.json")      # дозалит пустой эталон
+    assert silo.exists("songs/t/waveform.json")   # посчитан из vocals.wav
+    assert silo.exists("songs/t/pitch.json")      # дозалит пустой эталон
 
 
 def test_publish_missing_minus_mp3_is_error():
@@ -53,30 +53,30 @@ def test_publish_missing_minus_mp3_is_error():
 
 def test_publish_without_vocals_wav_still_works():
     _song()
-    minio.delete(song_key("t", "vocals.wav"))
+    silo.delete(song_key("t", "vocals.wav"))
     entry = publish_song("t")
     assert entry["vocals"] == "songs/t/vocals.mp3"  # запасной трек есть
-    assert not minio.exists("songs/t/waveform.json")
+    assert not silo.exists("songs/t/waveform.json")
 
 
 def test_waveform_recomputed_only_when_wav_changes():
     _song()
     publish_song("t")
-    assert minio.exists("songs/t/waveform.json")
+    assert silo.exists("songs/t/waveform.json")
 
     calls = {"n": 0}
-    real_download = minio.download
+    real_download = silo.download
 
     def counting(key, dst):
         calls["n"] += 1
         return real_download(key, dst)
 
-    minio.download = counting
+    silo.download = counting
     try:
         publish_song("t")  # wav не менялся — качать нечего
         assert calls["n"] == 0
     finally:
-        minio.download = real_download
+        silo.download = real_download
 
 
 def test_publish_entry_never_none_and_meta_intact():

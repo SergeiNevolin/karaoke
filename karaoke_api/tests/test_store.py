@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from karaoke_api import minio
+from karaoke_api import silo
 from karaoke_api.store.songs import (
     all_ids,
     build_manifest,
@@ -57,10 +57,10 @@ def test_save_roundtrip_and_history():
     assert read_meta("t")["lines"] == 1
     # после правки: старый текст остаётся в истории, новый — канон
     save_lyrics("t", {**payload, "segments": [{"start": 0, "end": 2, "text": "ты", "words": []}]})
-    hist = [k for k in minio.list_keys("songs/t/history/")
+    hist = [k for k in silo.list_keys("songs/t/history/")
             if k.rsplit("/", 1)[-1].startswith("lyrics-")]
     assert len(hist) == 1
-    assert json.loads(minio.get(hist[0]))["segments"][0]["text"] == "я"
+    assert json.loads(silo.get(hist[0]))["segments"][0]["text"] == "я"
 
 
 def test_save_history_pruned():
@@ -70,7 +70,7 @@ def test_save_history_pruned():
         payload = {"language": "ru",
                    "segments": [{"start": 0, "end": 1, "text": f"v{i}", "words": []}]}
         save_lyrics("t", payload)
-    hist = [k for k in minio.list_keys("songs/t/history/")
+    hist = [k for k in silo.list_keys("songs/t/history/")
             if k.rsplit("/", 1)[-1].startswith("lyrics-")]
     assert len(hist) == 20  # HISTORY_KEEP
 
@@ -104,9 +104,9 @@ def test_manifest_vocals_flag():
     """Ссылка на mp3 — только когда сам mp3 лежит в бакете (wav не считается)."""
     _song("a")
     assert manifest_entry("a")["vocals"] is None
-    minio.put(song_key("a", "vocals.wav"), b"RIFF")  # одного wav мало
+    silo.put(song_key("a", "vocals.wav"), b"RIFF")  # одного wav мало
     assert manifest_entry("a")["vocals"] is None
-    minio.put(song_key("a", "vocals.mp3"), b"ID3")
+    silo.put(song_key("a", "vocals.mp3"), b"ID3")
     assert manifest_entry("a")["vocals"] == "songs/a/vocals.mp3"
 
 

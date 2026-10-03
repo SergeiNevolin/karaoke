@@ -18,7 +18,7 @@ import tempfile
 import wave
 from pathlib import Path
 
-from karaoke_api import minio
+from karaoke_api import silo
 from karaoke_api.store.songs import all_ids, read_lyrics, read_meta, song_key
 
 log = logging.getLogger(__name__)
@@ -56,25 +56,25 @@ def waveform_peaks(path: Path, buckets: int = 1200) -> tuple[list[float], float]
 
 def _rel_if(sid: str, name: str) -> str | None:
     """Публичный путь mp3, если он есть в бакете."""
-    if minio.head(song_key(sid, name)) is None:
+    if silo.head(song_key(sid, name)) is None:
         return None
     return f"songs/{sid}/{name}"
 
 
 def _ensure_waveform(sid: str, title: str) -> None:
     """Пики вокала: считаем один раз на версию vocals.wav (проверка по head)."""
-    wav_head = minio.head(song_key(sid, "vocals.wav"))
+    wav_head = silo.head(song_key(sid, "vocals.wav"))
     if wav_head is None:
         log.warning("%s: нет vocals.wav, waveform недоступен", title)
         return
-    wf_head = minio.head(song_key(sid, "waveform.json"))
+    wf_head = silo.head(song_key(sid, "waveform.json"))
     if wf_head is not None and wf_head["last_modified"] >= wav_head["last_modified"]:
         return  # уже посчитан для этой версии вокала
     with tempfile.TemporaryDirectory(prefix=f"waveform-{sid}-") as td:
         local = Path(td) / "vocals.wav"
-        minio.download(song_key(sid, "vocals.wav"), local)
+        silo.download(song_key(sid, "vocals.wav"), local)
         peaks, wdur = waveform_peaks(local)
-    minio.put_json(song_key(sid, "waveform.json"), {"peaks": peaks, "duration": wdur})
+    silo.put_json(song_key(sid, "waveform.json"), {"peaks": peaks, "duration": wdur})
 
 
 def publish_song(sid: str) -> dict:
@@ -85,11 +85,11 @@ def publish_song(sid: str) -> dict:
     """
     meta = read_meta(sid)
     title = meta.get("title", sid)
-    if minio.head(song_key(sid, "minus.mp3")) is None:
+    if silo.head(song_key(sid, "minus.mp3")) is None:
         raise RuntimeError(f"{title}: нет minus.mp3 — перезапустите обработку песни")
 
-    if minio.head(song_key(sid, "pitch.json")) is None:
-        minio.put_json(song_key(sid, "pitch.json"), {"t": [], "midi": []})
+    if silo.head(song_key(sid, "pitch.json")) is None:
+        silo.put_json(song_key(sid, "pitch.json"), {"t": [], "midi": []})
 
     lyr = read_lyrics(sid) or {}
     segments = lyr.get("segments", [])

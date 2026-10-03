@@ -6,7 +6,7 @@ import zipfile
 from pathlib import Path
 
 import karaoke_api.worker as W
-from karaoke_api import minio
+from karaoke_api import silo
 from karaoke_api.config import SCRATCH
 from karaoke_api.pipeline import run_job
 from karaoke_api.registry import JobRegistry
@@ -67,7 +67,7 @@ class FakeGpu:
 def _run(gpu=None, *, title="Test", src_name="song.mp3", lyrics_text="",
          lyrics_url="", publisher=None, poll_interval=0.0, timeout_sec=5.0, fetcher=None):
     src_key = f"music/{src_name}"
-    minio.put(src_key, b"fake-audio")
+    silo.put(src_key, b"fake-audio")
     registry = JobRegistry(ttl_sec=60)
     job = registry.create(title=title, audio=src_key, lang="ru",
                           lyrics_text=lyrics_text, lyrics_url=lyrics_url)
@@ -97,11 +97,11 @@ def test_run_job_happy():
     assert meta["pipeline"]["models"] == "fake"
     assert meta["source"]["file"] == "music/song.mp3"
     assert meta["source"]["sha1"]  # посчитан по скачанному исходнику
-    assert minio.exists("songs/test/vocals.wav")
-    assert minio.exists("songs/test/minus.wav")
-    assert minio.exists("songs/test/minus.mp3")   # mp3 привёз бандл
-    assert minio.exists("songs/test/original.mp3")
-    assert minio.exists("songs/test/meta.json")
+    assert silo.exists("songs/test/vocals.wav")
+    assert silo.exists("songs/test/minus.wav")
+    assert silo.exists("songs/test/minus.mp3")   # mp3 привёз бандл
+    assert silo.exists("songs/test/original.mp3")
+    assert silo.exists("songs/test/meta.json")
     assert not list(SCRATCH.glob("job-*"))  # скраб всегда убирается
 
 

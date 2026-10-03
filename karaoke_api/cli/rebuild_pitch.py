@@ -13,7 +13,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from karaoke_api import minio
+from karaoke_api import silo
 from karaoke_api.config import KARAOKE_ML_SERVICE_URL
 from karaoke_api.gpu_client import GpuClient
 from karaoke_api.store.publish import publish_one
@@ -21,7 +21,7 @@ from karaoke_api.store.songs import all_ids, song_key
 
 
 def _old_pitch(sid: str) -> dict:
-    return minio.get_json(song_key(sid, "pitch.json"), {"t": []}) or {"t": []}
+    return silo.get_json(song_key(sid, "pitch.json"), {"t": []}) or {"t": []}
 
 
 def main() -> None:
@@ -40,13 +40,13 @@ def main() -> None:
     for sid in sids:
         t0 = time.time()
         vocals_key = song_key(sid, "vocals.wav")
-        if minio.head(vocals_key) is None:
+        if silo.head(vocals_key) is None:
             print(f"[SKIP] {sid}: нет vocals.wav в бакете")
             skipped += 1
             continue
         old = _old_pitch(sid)
         with tempfile.TemporaryDirectory(prefix="rebuild-pitch-") as td:
-            src = minio.download(vocals_key, Path(td) / "vocals.wav")
+            src = silo.download(vocals_key, Path(td) / "vocals.wav")
             try:
                 data = gpu.pitch(src)
             except Exception as e:  # noqa: BLE001
@@ -62,7 +62,7 @@ def main() -> None:
         if not (ok_len and ok_cov):
             fails.append(sid)
         else:
-            minio.put_json(song_key(sid, "pitch.json"), data)
+            silo.put_json(song_key(sid, "pitch.json"), data)
             try:
                 publish_one(sid)
             except Exception as e:  # noqa: BLE001

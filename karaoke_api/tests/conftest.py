@@ -1,13 +1,13 @@
-"""Общие фикстуры: каждый тест работает в пустом бакете MinIO (moto).
+"""Общие фикстуры: каждый тест работает в пустом бакете Silo (moto).
 
 Важно: moto перехватывает только стандартный endpoint — S3_ENDPOINT на время
-теста пустой, иначе boto3 уйдёт в реальный MinIO.
+теста пустой, иначе boto3 уйдёт в реальный Silo.
 """
 import pytest
 from moto import mock_aws
 
 from karaoke_api import config
-from karaoke_api import minio as storage
+from karaoke_api import silo as storage
 
 
 @pytest.fixture(autouse=True)

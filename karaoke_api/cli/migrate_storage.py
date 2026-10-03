@@ -1,4 +1,4 @@
-"""Миграция легаси-файловой системы в бакет MinIO.
+"""Миграция легаси-файловой системы в бакет Silo.
 
 Переносит (НЕ удаляя локальные файлы):
   data/public/songs/**  -> songs/**     (сначала публикация)
@@ -16,7 +16,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from karaoke_api import minio
+from karaoke_api import silo
 from karaoke_api.config import DATA_PUBLIC, MUSIC, STORE
 
 
@@ -30,11 +30,11 @@ def _upload_tree(src_root: Path, key_prefix: str, force: bool,
         if not p.is_file() or p.name in skip_names:
             continue
         key = key_prefix + p.relative_to(src_root).as_posix()
-        h = minio.head(key)
+        h = silo.head(key)
         if not force and h is not None and h["size"] == p.stat().st_size:
             skip += 1
             continue
-        minio.put_file(key, p)
+        silo.put_file(key, p)
         ok += 1
     return ok, skip
 
@@ -42,8 +42,8 @@ def _upload_tree(src_root: Path, key_prefix: str, force: bool,
 def _normalize_source_meta() -> int:
     """meta.source.file вида /путь/к/music/x.mp3 -> music/x.mp3 (объект уже залит)."""
     fixed = 0
-    for key in [k for k in minio.list_keys("songs/") if k.endswith("/meta.json")]:
-        meta = minio.get_json(key)
+    for key in [k for k in silo.list_keys("songs/") if k.endswith("/meta.json")]:
+        meta = silo.get_json(key)
         if not isinstance(meta, dict):
             continue
         src = str((meta.get("source") or {}).get("file") or "")
@@ -57,20 +57,20 @@ def _normalize_source_meta() -> int:
                 new = None
         else:
             new = p.as_posix() if p.parts[:1] == ("music",) else None
-        if new and new != src and minio.exists(new):
+        if new and new != src and silo.exists(new):
             meta["source"]["file"] = new
-            minio.put_json(key, meta)
+            silo.put_json(key, meta)
             fixed += 1
     return fixed
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="миграция data/ + music/ в бакет MinIO")
+    ap = argparse.ArgumentParser(description="миграция data/ + music/ в бакет Silo")
     ap.add_argument("--force", action="store_true",
                     help="залить заново даже совпадающие по размеру объекты")
     a = ap.parse_args()
 
-    print(f"бакет: {minio.bucket()} на minio endpoint, локальные файлы остаются на месте")
+    print(f"бакет: {silo.bucket()} на silo endpoint, локальные файлы остаются на месте")
     pub_ok, pub_skip = _upload_tree(DATA_PUBLIC, "songs/", a.force, skip_names=("manifest.json",))
     print(f"[1/4] data/public/songs -> songs/: +{pub_ok} (пропущено {pub_skip})")
     can_ok, can_skip = _upload_tree(STORE, "songs/", a.force)

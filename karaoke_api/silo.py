@@ -1,4 +1,4 @@
-"""Хранилище объектов MinIO/S3: все постоянные данные песен живут в бакете.
+"""Хранилище объектов Silo/S3: все постоянные данные песен живут в бакете.
 
 Раскладка ключей (бакет S3_BUCKET, по умолчанию karaoke):
   songs/<id>/...   канон песни + опубликованные mp3/JSON (мета, текст, волна,
@@ -40,7 +40,7 @@ class InvalidRange(ValueError):
 
 
 def client():
-    """Ленивый S3-клиент (path-style — так требует MinIO).
+    """Ленивый S3-клиент (path-style — так требует Silo).
 
     Читает config на каждый вызов: тесты подменяют endpoint на пустой,
     чтобы moto перехватывал запросы (кастомный endpoint он не перехватывает).
@@ -71,7 +71,7 @@ def bucket() -> str:
 
 
 def ensure_bucket() -> None:
-    """Гарантировать бакет на старте: нет MinIO — падаем сразу, а не в рантайме."""
+    """Гарантировать бакет на старте: нет Silo — падаем сразу, а не в рантайме."""
     try:
         client().head_bucket(Bucket=bucket())
         return
@@ -82,7 +82,7 @@ def ensure_bucket() -> None:
         log.info("создан бакет %s на %s", bucket(), config.S3_ENDPOINT_URL or "(moto)")
     except ClientError as e:
         raise RuntimeError(
-            f"MinIO {config.S3_ENDPOINT_URL}: бакет {bucket()} недоступен: {e}") from e
+            f"Silo {config.S3_ENDPOINT_URL}: бакет {bucket()} недоступен: {e}") from e
 
 
 def _code(e: ClientError) -> str:
@@ -212,7 +212,7 @@ def download(key: str, dst: Path) -> Path:
 
 
 def health() -> bool:
-    """Жив ли MinIO (для диагностики)."""
+    """Жив ли Silo (для диагностики)."""
     try:
         client().list_buckets()
         return True

@@ -8,7 +8,7 @@ from pathlib import Path
 from fastapi import APIRouter, File, Form, UploadFile
 from starlette.concurrency import run_in_threadpool
 
-from .. import minio, worker
+from .. import silo, worker
 from ..config import (
     ALLOWED_EXT,
     ALLOWED_LANG,
@@ -29,7 +29,7 @@ CHUNK = 1024 * 1024
 
 def _unique_music_key(stem: str, ext: str) -> tuple[str, int]:
     """Свободный ключ исходника: music/stem, music/stem-2, music/stem-3..."""
-    taken = set(minio.list_keys("music/"))
+    taken = set(silo.list_keys("music/"))
     variant = 1
     key = f"music/{stem}{ext}"
     while key in taken:
@@ -77,7 +77,7 @@ async def upload(
     if variant > 1:
         title = f"{title} ({variant})"
     try:
-        await run_in_threadpool(minio.put_file, key, Path(tmp_name))
+        await run_in_threadpool(silo.put_file, key, Path(tmp_name))
     finally:
         os.unlink(tmp_name)
 

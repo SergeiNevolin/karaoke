@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 import karaoke_api.api.songs as api_songs
 import karaoke_api.app as app_module
-from karaoke_api import config, minio
+from karaoke_api import config, silo
 from karaoke_api.store.songs import write_meta
 
 SECRET = "test-secret-0123456789abcdef01234567"
@@ -80,7 +80,7 @@ def test_cookie_opens_api(client):
 
 
 def test_static_401_and_cookie_200(client):
-    minio.put("songs/t/minus.mp3", b"mp3-bytes")
+    silo.put("songs/t/minus.mp3", b"mp3-bytes")
     assert client.get("/songs/t/minus.mp3").status_code == 401
     client.cookies.set("karaoke_auth", make_token())
     r = client.get("/songs/t/minus.mp3")

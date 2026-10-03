@@ -1,7 +1,7 @@
 """
 Караоке-бэкенд: приём песен через интерфейс + GPU-пайплайн в фоне.
 
-Канон данных — объекты songs/<id>/ в MinIO (см. karaoke_api.minio);
+Канон данных — объекты songs/<id>/ в Silo (см. karaoke_api.silo);
 /songs/* отдаётся из бакета с Range, локальный диск — только рабочая область.
 Роуты — karaoke_api.api.*, очередь — karaoke_api.worker.
 
@@ -17,7 +17,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from . import minio, worker
+from . import silo, worker
 from .api import jobs as jobs_routes
 from .api import songs as songs_routes
 from .auth import install_auth
@@ -29,7 +29,7 @@ log = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    minio.ensure_bucket()  # MinIO не поднялся — умираем на старте, а не в рантайме
+    silo.ensure_bucket()  # Silo не поднялся — умираем на старте, а не в рантайме
     worker.start()
     try:
         yield
