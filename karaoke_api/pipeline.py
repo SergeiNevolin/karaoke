@@ -66,7 +66,7 @@ def _run(job: Job, registry: JobRegistry, *, scratch: Path, gpu_factory, fetcher
 
     with _source_file(job.audio, scratch) as local_audio:
         source_sha1 = sha1_of(local_audio)
-        remote_id = gpu.submit_job(str(local_audio), job.lang, custom_text)
+        remote_id = gpu.submit_job(local_audio, job.lang, custom_text)
         _poll(gpu, remote_id, job, registry, interval=poll_interval, timeout_sec=timeout_sec)
     return _install(job, gpu.job_result(remote_id), scratch=scratch, gpu=gpu,
                     publisher=publisher, source_sha1=source_sha1)

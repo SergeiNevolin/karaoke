@@ -51,6 +51,7 @@ class GpuClient:
 
     def submit_job(self, audio: Path, lang: str, text: str = "") -> str:
         """Сабмит полного пайплайна. Возвращает id задачи на GPU-боксе."""
+        audio = Path(audio)
         with open(audio, "rb") as f:
             r = self._request("POST", "/v1/jobs", retry=False,
                               files={"file": (audio.name, f)},
