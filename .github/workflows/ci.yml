@@ -69,6 +69,11 @@ jobs:
         with:
           context: .
           file: Dockerfile
+          # прод-образ живёт внутри bebradio → SPA должна быть собрана
+          # с префиксом /karaoke/ (иначе iframe на bebradio.ru пустой)
+          build-args: |
+            BASE_PATH=/karaoke/
+            API_BASE=/karaoke
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
