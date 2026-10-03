@@ -8,9 +8,10 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { displayPitchTrack, gatePitchToSegments, quantizePitchTrack } from './pitch'
 
-// Данные читаем с диска (а не импортом): песни живут в data/songs за
-// корнем web — vite не резолвит модули наружу. Всегда живые данные стора.
-const DATA = join(process.cwd(), '..', 'data', 'songs')
+// Фикстуры лежат в репо (web/fixtures) — тест должен воспроизводиться в CI,
+// где data/ (gitignored, реальный стор) недоступен. vite не резолвит модули
+// наружу, поэтому читаем с диска, а не импортом.
+const DATA = join(process.cwd(), 'fixtures')
 const load = (sid: string, name: string) =>
   JSON.parse(readFileSync(join(DATA, sid, name), 'utf-8'))
 const vikPitch = load('igor-vikhorkov-ty-shljukha-ne-moja', 'pitch.json')
