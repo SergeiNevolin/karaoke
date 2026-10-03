@@ -85,7 +85,7 @@ docker compose up --build   # http://localhost:8002
   uid 10001, `HEALTHCHECK` по `GET /healthz` (эта точка авторизацию не спрашивает);
 - compose поднимает свой MinIO (порты 9100/9001, чтобы не пересекаться с
   bebradio); `./data` в контейнере — рабочая область (scratch) и источник
-  разовой миграции: `docker compose run --rm karaoke-api python -m karaoke_api.cli.migrate_storage`;
+  разовой миграции: `docker compose run --rm karaoke-service python -m karaoke_api.cli.migrate_storage`;
 - env: `AUTH_JWT_SECRET`, `KARAOKE_ML_SERVICE_URL`, `S3_ENDPOINT`,
   `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_BUCKET`, `LOG_LEVEL`,
   `MAX_UPLOAD_MB`, `MAX_BUNDLE_MB` — полный список с дефолтами в `.env.example`;
@@ -98,7 +98,7 @@ docker compose up --build   # http://localhost:8002
 
 Караоке встраивается в bebradio как отдельный сервис и открыт в UI на
 `/karaoke` (iframe; см. bebradio, раздел «Караоке»): nginx проксирует
-`/karaoke/` → `karaoke-api:8000`, авторизация — общий JWT
+`/karaoke/` → `karaoke-service:8000`, авторизация — общий JWT
 (`AUTH_JWT_SECRET` = `SECRET_KEY` bebradio, HS256, клеймы `sub`+`exp`).
 
 - сборка под префикс:
@@ -170,7 +170,7 @@ python -m uvicorn karaoke_api.app:app --port 8000
   `python -m karaoke_api.cli.migrate_storage [--force]` (идемпотентно,
   читает `DATA_PUBLIC`/`STORE`/`MUSIC` и заливает в бакет);
 - в bebradio используется его MinIO (бакет `karaoke`, env подставляет
-  compose-файл сервиса `karaoke-api`).
+  compose-файл сервиса `karaoke-service`).
 
 ## Эксплуатация
 

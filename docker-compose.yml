@@ -1,6 +1,6 @@
 # Standalone-запуск: весь стек караоке без bebradio, включая вход (AUTH_JWT_SECRET пустой).
 # Данные — в MinIO (бакет karaoke); ./data — рабочая область + источник миграции:
-#   docker compose run --rm karaoke-api python -m karaoke_api.cli.migrate_storage
+#   docker compose run --rm karaoke-service python -m karaoke_api.cli.migrate_storage
 # Запуск: docker compose up --build  (интерфейс на http://localhost:8002)
 services:
   minio:
@@ -22,11 +22,11 @@ services:
       retries: 5
     restart: unless-stopped
 
-  karaoke-api:
+  karaoke-service:
     build:
       context: .
       dockerfile: Dockerfile
-    image: karaoke-api:local
+    image: karaoke-service:local
     restart: unless-stopped
     ports:
       - "8002:8000"

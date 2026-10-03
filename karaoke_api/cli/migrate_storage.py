@@ -7,7 +7,7 @@
 и нормализует meta.source.file: абсолютные пути внутрь music/ -> music/<файл>.
 
 Идемпотентно: объект того же размера пропускается (--force — залить заново).
-Запуск из контейнера: docker compose run --rm karaoke-api \
+Запуск из контейнера: docker compose run --rm karaoke-service \
     python -m karaoke_api.cli.migrate_storage
 """
 from __future__ import annotations
