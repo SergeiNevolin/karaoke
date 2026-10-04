@@ -19,6 +19,7 @@ import wave
 from pathlib import Path
 
 from karaoke_api import silo
+from karaoke_api.store import catalog
 from karaoke_api.store.songs import all_ids, read_lyrics, read_meta, song_key
 
 log = logging.getLogger(__name__)
@@ -99,6 +100,12 @@ def publish_song(sid: str) -> dict:
         log.warning("%s: original.mp3 отсутствует (старый бандл?)", title)
     vocals_rel = _rel_if(sid, "vocals.mp3")
     _ensure_waveform(sid, title)
+
+    catalog.upsert(sid, title=meta.get("title") or sid, language=meta.get("language"),
+                   lines=meta.get("lines") or 0, duration=meta.get("duration") or 0,
+                   has_original=original_rel is not None, has_vocals=vocals_rel is not None,
+                   source_sha1=(meta.get("source") or {}).get("sha1"),
+                   created=meta.get("created"), updated=meta.get("updated"))
 
     return {
         "id": sid,

@@ -1,8 +1,26 @@
 # Standalone-запуск: весь стек караоке без bebradio, включая вход (AUTH_JWT_SECRET пустой).
-# Данные — в Silo (бакет karaoke); ./data — рабочая область + источник миграции:
-#   docker compose run --rm karaoke-service python -m karaoke_api.cli.migrate_storage
+# Данные: объекты песен — Silo (бакет karaoke), каталог и реестр задач — PostgreSQL (БД
+# karaoke, обязателен); ./data — рабочая область (scratch).
 # Запуск: docker compose up --build  (интерфейс на http://localhost:8002)
 services:
+  postgres:
+    image: postgres:16-alpine
+    # 5433, чтобы не конфликтовать с postgres из bebradio (5432)
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: karaoke
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d karaoke"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
   silo:
     image: pgsty/silo:latest
     command: server /data --console-address ":9001"
@@ -40,7 +58,10 @@ services:
       S3_ACCESS_KEY: ${S3_ACCESS_KEY:-siloadmin}
       S3_SECRET_KEY: ${S3_SECRET_KEY:-siloadmin}
       S3_BUCKET: ${S3_BUCKET:-karaoke}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/karaoke}
     depends_on:
+      postgres:
+        condition: service_healthy
       silo:
         condition: service_healthy
     volumes:
@@ -50,3 +71,4 @@ services:
 
 volumes:
   miniodata:
+  pgdata:

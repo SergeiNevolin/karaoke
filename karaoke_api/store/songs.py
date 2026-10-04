@@ -28,6 +28,7 @@ import re
 from datetime import datetime
 
 from karaoke_api import silo
+from karaoke_api.store import catalog
 from karaoke_api.utils import now_iso
 
 HISTORY_KEEP = 20
@@ -76,6 +77,10 @@ def read_meta(sid: str) -> dict:
 def write_meta(sid: str, meta: dict) -> dict:
     meta = {**meta, "id": sid}
     write_json(song_key(sid, "meta.json"), meta)
+    catalog.upsert(sid, title=meta.get("title") or sid, language=meta.get("language"),
+                   lines=meta.get("lines") or 0, duration=meta.get("duration") or 0,
+                   source_sha1=(meta.get("source") or {}).get("sha1"),
+                   created=meta.get("created"), updated=meta.get("updated"))
     return meta
 
 
@@ -175,13 +180,8 @@ def manifest_entry(sid: str) -> dict | None:
 
 
 def build_manifest() -> dict:
-    songs = []
-    for sid in all_ids():
-        e = manifest_entry(sid)
-        if e:
-            songs.append(e)
-    songs.sort(key=lambda s: str(s.get("title", s["id"])).lower())
-    return {"songs": songs}
+    """Каталог для фронта — из PG (без запроса к Silo на каждую строку)."""
+    return {"songs": catalog.manifest_rows()}
 
 
 def sha1_of(path) -> str:

@@ -22,6 +22,8 @@ def test_valid_defaults_pass():
     ("S3_BUCKET", "", "S3_BUCKET"),
     ("S3_BUCKET", "BíG Bucket", "S3_BUCKET"),
     ("S3_BUCKET", "a" * 64, "S3_BUCKET"),
+    ("DATABASE_URL", "", "DATABASE_URL"),
+    ("DATABASE_URL", "mysql://user@host/db", "DATABASE_URL"),
 ])
 def test_bad_config_rejected(monkeypatch, attr, value, piece):
     monkeypatch.setattr(config, attr, value)

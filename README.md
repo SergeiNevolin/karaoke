@@ -38,15 +38,22 @@ Silo-бакет karaoke (S3):                          # КАНОН + пабли
   `publish.py` — паблиш mp3/waveform поверх канона)
 - `karaoke_api/lyrics.py` — текстовые утилиты (Genius, SSRF-проверка; лёгкие,
   без GPU)
-- `karaoke_api/cli/` — `migrate_storage`, `export`, `rebuild_pitch`, `fixtures`
+- `karaoke_api/cli/` — `export`, `rebuild_pitch`, `fixtures`
 - `karaoke_api/config.py`, `errors.py`, `schemas.py`, `utils.py` — конфигурация
   и лимиты, `ApiError`, схемы Pydantic, общие утилиты
 
 GPU-код — только в `karaoke_ml_service/` (`app.py`, `pipeline.py`, `core/`).
 Клиент сервиса живёт в основном бэкенде: `karaoke_api/gpu_client.py`.
 
-Тесты: `python -m pytest -q` (обе папки из `pyproject.toml`), линт:
-`python -m ruff check karaoke_api karaoke_ml_service`
+Тесты: PostgreSQL обязателен — поднимите стек bebradio или
+`docker compose up -d postgres` этого репо (порт 5433), затем
+
+```powershell
+$env:DATABASE_URL='postgresql://postgres:postgres@localhost:5432/karaoke'  # 5433 — standalone-стек
+python -m pytest -q   # обе папки из pyproject.toml
+```
+
+Линт: `python -m ruff check karaoke_api karaoke_ml_service`
 
 
 ## Быстрый старт
@@ -84,13 +91,17 @@ docker compose up --build   # http://localhost:8002
   отдаёт API/статику; non-root
   uid 10001, `HEALTHCHECK` по `GET /healthz` (эта точка авторизацию не спрашивает);
 - compose поднимает свой Silo (порты 9100/9001, чтобы не пересекаться с
-  bebradio); `./data` в контейнере — рабочая область (scratch) и источник
-  разовой миграции: `docker compose run --rm karaoke-service python -m karaoke_api.cli.migrate_storage`;
+  bebradio); `./data` в контейнере — рабочая область (scratch);
 - env: `AUTH_JWT_SECRET`, `KARAOKE_ML_SERVICE_URL`, `S3_ENDPOINT`,
-  `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_BUCKET`, `LOG_LEVEL`,
+  `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_BUCKET`, `DATABASE_URL`, `LOG_LEVEL`,
   `MAX_UPLOAD_MB`, `MAX_BUNDLE_MB` — полный список с дефолтами в `.env.example`;
   невалидные значения отваливаются на старте (`validate_config`);
-- CI (`.github/workflows/ci.yml`): ruff + pytest лёгкого рантайма, веб-сборка
+- PostgreSQL (`DATABASE_URL`) — каталог песен и реестр задач, обязателен:
+  схему на старте поднимает миграция (`karaoke_api/db/migrations/`,
+  `schema_migrations`), разово БД создаёт `infra/pg-karaoke.sql`; без URL
+  сервис падает на валидации конфигурации;
+- CI (`.github/workflows/ci.yml`): ruff + pytest лёгкого рантайма (сервис
+  postgres, `DATABASE_URL` на уровне job), веб-сборка
   и тесты, сборка образа и пуш `ghcr.io/<owner>/<repo>:<branch|semver|sha>`
   на push в main/теги (нужен remote репозитория).
 
@@ -165,24 +176,21 @@ Silo — community-форк MinIO: тот же S3 API, env-имена `MINIO_*` 
 | канон песни (meta/lyrics/pitch/waveform/wav/history) | бакет `S3_BUCKET`, `songs/<id>/...` |
 | опубликованные mp3 (`minus/original/vocals`) | там же, ключи `songs/<id>/...` (слиты с каноном) |
 | загруженные исходники | бакет, ключи `music/...` (`meta.source.file` = этот ключ) |
-| манифест каталога (`GET /api/songs`) | не хранится — собирается на лету из `meta.json` |
+| манифест каталога (`GET /api/songs`) | PostgreSQL, таблица `songs` (производная `meta.json`) |
 | scratch воркера | `data/scratch/job-<id>/`, удаляется после задачи |
 
 - env: `S3_ENDPOINT` (пусто = штатный AWS boto3), `S3_ACCESS_KEY`,
   `S3_SECRET_KEY`, `S3_BUCKET` (дефолт `karaoke`), `S3_REGION`;
 - публикация атомарна: `meta.json` заливается последним, без него песня
   не видна в каталоге; сироты без `meta` чистятся перед установкой;
-- разовый перенос старого файлового layout (включая `music/`):
-  `python -m karaoke_api.cli.migrate_storage [--force]` (идемпотентно,
-  читает `DATA_PUBLIC`/`STORE`/`MUSIC` и заливает в бакет);
 - в bebradio используется его Silo (бакет `karaoke`, env подставляет
   compose-файл сервиса `karaoke-service`).
 
 ## Эксплуатация
 
 - **Один uvicorn-воркер**: `python -m uvicorn karaoke_api.app:app --port 8000` —
-  реестр задач и очередь воркера живут in-memory, несколько воркеров не
-  видели бы чужих задач. То же касается `karaoke_ml_service` (плюс GPU-семафор).
+  очередь и горячий слой реестра in-memory (PG зеркалит историю), несколько
+  воркеров не видели бы чужих задач. То же касается `karaoke_ml_service` (плюс GPU-семафор).
 - Рестарт = выполняемые задачи теряются; завершённые чистятся по
   `JOB_TTL_SEC`. Прод-многопроцессности нужна внешняя очередь (Redis) —
   осознанно вне объёма.
@@ -191,7 +199,6 @@ Silo — community-форк MinIO: тот же S3 API, env-имена `MINIO_*` 
 ## Отдельные шаги
 
 ```powershell
-python -m karaoke_api.cli.migrate_storage [--force]  # перенос файлового layout в бакет (однократно)
 python -m karaoke_api.cli.export [--only <id>]       # переопубликовать mp3/waveform в бакете
 python -m karaoke_api.cli.rebuild_pitch [--only <id>]
 ```

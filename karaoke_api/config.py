@@ -11,11 +11,6 @@ DIST = ROOT / "web" / "dist"
 #: рабочая область на диске (бандлы пайплайна, upload-буфер) — НЕ хранилище
 SCRATCH = ROOT / "data" / "scratch"
 
-#: легаси-каталоги исходной файловой системы; нужны только cli.migrate_storage
-MUSIC = ROOT / "music"
-STORE = ROOT / "data" / "songs"
-DATA_PUBLIC = ROOT / "data" / "public" / "songs"
-
 # GPU-микросервис. Пусто — считаем локально на этой машине.
 KARAOKE_ML_SERVICE_URL = os.environ.get("KARAOKE_ML_SERVICE_URL", "http://127.0.0.1:8001").strip()
 
@@ -30,6 +25,9 @@ S3_ACCESS_KEY = os.environ.get("S3_ACCESS_KEY", "siloadmin").strip()
 S3_SECRET_KEY = os.environ.get("S3_SECRET_KEY", "siloadmin").strip()
 S3_BUCKET = os.environ.get("S3_BUCKET", "karaoke").strip()
 S3_REGION = os.environ.get("S3_REGION", "").strip()
+
+#: PostgreSQL (каталог песен + реестр задач) — обязателен, пусто: ошибка в validate_config
+DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 
 
 def _int_env(name: str, default: int) -> int:
@@ -66,6 +64,13 @@ def validate_config() -> None:
     if not S3_BUCKET or len(S3_BUCKET) > 63 or not re.fullmatch(r"[a-z0-9][a-z0-9.-]*", S3_BUCKET):
         errors.append(
             f"S3_BUCKET={S3_BUCKET!r} — ждём бакет в нижнем регистре (a-z0-9.-, до 63)")
+    if not DATABASE_URL:
+        errors.append("DATABASE_URL не задан — PostgreSQL обязателен (каталог и реестр задач)")
+    else:
+        u = urlparse(DATABASE_URL)
+        if u.scheme not in ("postgresql", "postgres") or not u.netloc or not u.path.strip("/"):
+            errors.append(
+                f"DATABASE_URL={DATABASE_URL!r} — ждём postgresql://user:pass@host[:port]/db")
     if LOG_LEVEL not in {"CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG", "NOTSET"}:
         errors.append(f"LOG_LEVEL={LOG_LEVEL!r} — нет такого уровня")
     if errors:

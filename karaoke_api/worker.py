@@ -1,4 +1,4 @@
-"""Очередь задач: один фоновый поток-потребитель, состояние — JobRegistry."""
+"""Очередь задач: один фоновый поток-потребитель, состояние — PgJobRegistry."""
 from __future__ import annotations
 
 import logging
@@ -8,11 +8,11 @@ import threading
 
 from . import pipeline
 from .config import JOB_TTL_SEC, SCRATCH
-from .registry import Job, JobRegistry
+from .registry import Job, JobRegistry, PgJobRegistry
 
 log = logging.getLogger(__name__)
 
-registry = JobRegistry(ttl_sec=JOB_TTL_SEC)
+registry: JobRegistry = PgJobRegistry(JOB_TTL_SEC)
 _queue: queue.Queue[str | None] = queue.Queue()
 _thread: threading.Thread | None = None
 
@@ -32,6 +32,7 @@ def start() -> None:
     _clean_tmp()
     if _thread is not None and _thread.is_alive():
         return
+    registry.mark_interrupted()  # висящие с прошлого старта — честно помечаем ошибкой
     _thread = threading.Thread(target=_consume, name="karaoke-worker", daemon=True)
     _thread.start()
     log.info("worker запущен")

@@ -8,5 +8,8 @@ httpx>=0.27.0
 python-multipart>=0.0.18
 PyJWT>=2.8.0
 boto3>=1.34.0
+# PostgreSQL (каталог песен + реестр задач) — обязателен; psycopg ленивый
+psycopg[binary]>=3.1.18
+psycopg-pool>=3.2.0
 pytest>=8.0.0
 moto[s3]>=5.0.0

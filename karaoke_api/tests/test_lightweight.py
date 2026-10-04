@@ -15,11 +15,13 @@ LIGHT_MODULES = [
     "karaoke_api.api.jobs",
     "karaoke_api.store.songs",
     "karaoke_api.store.publish",
+    "karaoke_api.store.catalog",
     "karaoke_api.lyrics",
     "karaoke_api.config",
     "karaoke_api.auth",
     "karaoke_api.gpu_client",
     "karaoke_api.silo",
+    "karaoke_api.db",
     # karaoke_api.cli.export/fixtures — тоже лёгкие (импортируют только store/config).
     # karaoke_api.cli.rebuild_pitch тут нет сознательно: он ДВИЖОК перегона,
     # живёт там же, где torch (GPU-бокс / dev-машина).

@@ -13,6 +13,22 @@ concurrency:
 jobs:
   backend:
     runs-on: ubuntu-latest
+    # PostgreSQL обязателен: каталог и реестр задач (легаси-режим удалён)
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/karaoke
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: karaoke
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

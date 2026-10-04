@@ -17,7 +17,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from . import silo, worker
+from . import db, silo, worker
 from .api import jobs as jobs_routes
 from .api import songs as songs_routes
 from .auth import install_auth
@@ -30,11 +30,13 @@ log = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     silo.ensure_bucket()  # Silo не поднялся — умираем на старте, а не в рантайме
+    db.migrate()  # PG недоступен или битые миграции — тоже умираем на старте
     worker.start()
     try:
         yield
     finally:
         worker.stop()
+        db.close()
 
 
 def create_app() -> FastAPI:
