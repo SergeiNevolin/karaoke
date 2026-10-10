@@ -7,7 +7,7 @@ import zipfile
 from pathlib import Path
 
 import pytest
-from fakes import BoomPipeline, FakePitch, FakeSeparator, FakeTranscriber, wav
+from fakes import BoomPipeline, FakeAligner, FakePitch, FakeSeparator, FakeTranscriber, wav
 from fastapi.testclient import TestClient
 
 import karaoke_ml_service.app as gpu_app
@@ -25,6 +25,7 @@ def api(tmp_path, monkeypatch):
         return KaraokePipeline(separator=FakeSeparator(),
                                transcriber=FakeTranscriber(),
                                pitch_extractor=FakePitch(),
+                               aligner=FakeAligner(),
                                keep_whisper=False)
 
     monkeypatch.setattr(gpu_app, "make_pipeline", factory)

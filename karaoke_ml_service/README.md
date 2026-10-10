@@ -8,8 +8,13 @@
 - `app.py` — FastAPI: роуты, приём файла (чанками, лимит), жизненный цикл
   (lifespan вычищает осиротевшие каталоги задач), сборка zip-бандла.
 - `pipeline.py` — `KaraokePipeline.run()`: оркестратор шагов Demucs →
-  Whisper → CREPE; кэш модели whisper; `on_stage(stage, progress)` —
+  Whisper → **align** → CREPE; кэш модели whisper; `on_stage(stage, progress)` —
   колбэк прогресса (ключи синхронны с `karaoke_api.config.STAGE_LABELS`).
+  Align живёт внутри стадии `lyrics` (отдельного ключа нет): после Whisper
+  границы слов перерасставляются forced alignment'ом
+  (`core/align.py:WordAligner` — CTC wav2vec2 XLSR + onset-снап), и только
+  потом накладывается свой текст (наследующий уже точные якоря).
+  Отключается env `ALIGN_ENABLED=0`.
 - `jobs.py` — `Job`/`JobRegistry`: состояние в памяти, результат на диске,
   TTL-очистка завершённых задач (`RESULT_TTL_SEC`).
 - `config.py` — пути, лимиты, имена моделей, `STAGE_PROGRESS`, `LOG_LEVEL`.
@@ -17,7 +22,11 @@
   HTTP-статус (включая 500 с `logging.exception`).
 - `core/` — обёртки-классы над тяжёлым кодом:
   `VocalSeparator`, `Transcriber`, `PitchExtractor`, `PitchScorer`
-  (файлы `separate.py`, `transcribe.py`, `pitch.py`, `lyrics.py`);
+  (файлы `separate.py`, `transcribe.py`, `pitch.py`, `lyrics.py`)
+  плюс `WordAligner` (`align.py`: forced alignment слов — CTC через
+  wav2vec2 XLSR с Viterbi-треллисом, fallback — onset-снап по энергии
+  vocals.wav с предпочтением вперёд; env `ALIGN_MODEL`/`ALIGN_WINDOW_SEC`/
+  `ALIGN_MIN_CONF`);
   консольных entry-point'ов нет — шаги запускает только
   `KaraokePipeline`. Внутренности `core/` (DP-логика наложения текста,
   метрики скоринга) — вне объёма рефакторинга.

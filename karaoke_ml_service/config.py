@@ -8,6 +8,11 @@ from pathlib import Path
 SEPARATION_MODEL = "htdemucs_ft"
 WHISPER_MODEL = "large-v3"
 PITCH_MODEL = "crepe"
+#: CTC-алайнер слов (второй проход таймингов после Whisper).
+#: Мультиязычный XLSR с русской доводкой: русские слова тянет точно,
+#: латиницу покрывает тем же словарём. Перекрывается env ALIGN_MODEL.
+ALIGN_MODEL = os.environ.get(
+    "ALIGN_MODEL", "jonatasgrosman/wav2vec2-large-xlsr-53-russian")
 
 # Синк с karaoke_api/config.ALLOWED_EXT: общий импорт тянул бы сервер в GPU-образ ради трёх строк.
 ALLOWED_EXT = {".mp3", ".wav", ".flac", ".m4a", ".ogg",
@@ -38,6 +43,13 @@ MAX_LYRICS_TEXT = _int_env("MAX_LYRICS_TEXT", 20000)
 RESULT_TTL_SEC = _float_env("RESULT_TTL_SEC", 3600.0)
 #: кэшировать whisper large-v3 на всё время процесса (главный выигрыш повторных джоб)
 KEEP_WHISPER = os.environ.get("KEEP_WHISPER", "1").lower() not in ("0", "false", "no")
+#: второй проход таймингов слов (CTC + onset-снап внутри стадии lyrics,
+#: отдельного ключа стадий нет — см. STAGE_PROGRESS). 0 — оставить whisper как есть
+ALIGN_ENABLED = os.environ.get("ALIGN_ENABLED", "1").lower() not in ("0", "false", "no")
+#: окно onset-снапа вокруг начала слова (сек). Whisper спешит — тянем вперёд
+ALIGN_WINDOW_SEC = _float_env("ALIGN_WINDOW_SEC", 0.25)
+#: ниже этой уверенности CTC слово дополнительно тянется к onset'у
+ALIGN_MIN_CONF = _float_env("ALIGN_MIN_CONF", 0.3)
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
 
 #: каталог задач (каждая джоба — свой подкаталог с результатом)

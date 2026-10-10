@@ -63,6 +63,22 @@ class FakePitch:
         self.closed = True
 
 
+class FakeAligner:
+    """No-op алайнер: возвращает сегменты как есть, помнит вызовы."""
+
+    def __init__(self, **kwargs):
+        self.init_kwargs = kwargs
+        self.calls: list[tuple[Path, str | None]] = []
+        self.closed = False
+
+    def align(self, vocals: Path, segments: list, lang: str | None = None) -> list:
+        self.calls.append((Path(vocals), lang))
+        return segments
+
+    def close(self) -> None:
+        self.closed = True
+
+
 class BoomPipeline:
     def run(self, *args, **kwargs):
         raise RuntimeError("gpu сгорел")

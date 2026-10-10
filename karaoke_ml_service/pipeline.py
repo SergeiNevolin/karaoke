@@ -7,7 +7,18 @@ import subprocess
 import threading
 from pathlib import Path
 
-from .config import KEEP_WHISPER, SEPARATION_MODEL, STAGE_PROGRESS, VIDEO_EXT, WHISPER_MODEL
+from .config import (
+    ALIGN_ENABLED,
+    ALIGN_MIN_CONF,
+    ALIGN_MODEL,
+    ALIGN_WINDOW_SEC,
+    KEEP_WHISPER,
+    SEPARATION_MODEL,
+    STAGE_PROGRESS,
+    VIDEO_EXT,
+    WHISPER_MODEL,
+)
+from .core.align import WordAligner
 from .core.lyrics import apply_text_to_segments, clean_lines
 from .core.pitch import PitchExtractor
 from .core.separate import VocalSeparator
@@ -60,11 +71,14 @@ class KaraokePipeline:
     """Один прогон: владеет созданными шагами, Demucs/CREPE выгружает между шагами."""
 
     def __init__(self, *, separator=None, transcriber=None, pitch_extractor=None,
-                 keep_whisper: bool | None = None):
+                 aligner=None, keep_whisper: bool | None = None,
+                 enable_align: bool | None = None):
         self._sep = separator
         self._transcriber = transcriber
         self._pitch = pitch_extractor
+        self._aligner = aligner
         self.keep_whisper = KEEP_WHISPER if keep_whisper is None else keep_whisper
+        self.enable_align = ALIGN_ENABLED if enable_align is None else enable_align
 
     def run(self, src: Path, work: Path, *, lang: str = "", text: str = "",
             on_stage=None) -> dict:
@@ -116,6 +130,7 @@ class KaraokePipeline:
             tr, owned = Transcriber(model=WHISPER_MODEL), True
         try:
             data = tr.transcribe(vocals, lang=lang)
+            data = self._refine_timing(vocals, data, lang=lang)
             if text.strip():
                 segments, stats = apply_text_to_segments(
                     data.get("segments", []), clean_lines(text))
@@ -125,6 +140,33 @@ class KaraokePipeline:
         finally:
             if owned:
                 tr.close()
+
+    def _refine_timing(self, vocals: Path, data: dict, *, lang: str) -> dict:
+        """Второй проход таймингов (forced alignment) внутри стадии lyrics.
+
+        Отдельного ключа стадий нет — фронт видит те же STAGE_PROGRESS.
+        Любая ошибка алайнера -> whisper-тайминги как есть (не роняем задачу).
+        """
+        if not self.enable_align:
+            return data
+        segments = data.get("segments", []) or []
+        if not segments:
+            return data
+        if self._aligner is not None:
+            try:
+                data = {**data, "segments": self._aligner.align(vocals, segments, lang=lang)}
+            except Exception:
+                log.exception("инжектированный алайнер упал, оставляю whisper")
+            return data
+        aligner = WordAligner(model=ALIGN_MODEL, snap_window=ALIGN_WINDOW_SEC,
+                              min_conf=ALIGN_MIN_CONF)
+        try:
+            data = {**data, "segments": aligner.align(vocals, segments, lang=lang)}
+        except Exception:
+            log.exception("align упал, оставляю whisper-тайминги")
+        finally:
+            aligner.close()
+        return data
 
     def _pitch_of(self, vocals: Path) -> dict:
         owned = self._pitch is None
