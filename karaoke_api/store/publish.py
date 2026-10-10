@@ -102,6 +102,9 @@ def publish_song(sid: str) -> dict:
     _ensure_waveform(sid, title)
 
     catalog.upsert(sid, title=meta.get("title") or sid, language=meta.get("language"),
+                   artist=meta.get("artist"),
+                   owner_id=(meta.get("owner") or {}).get("id"),
+                   owner_name=(meta.get("owner") or {}).get("name"),
                    lines=meta.get("lines") or 0, duration=meta.get("duration") or 0,
                    has_original=original_rel is not None, has_vocals=vocals_rel is not None,
                    source_sha1=(meta.get("source") or {}).get("sha1"),
@@ -116,6 +119,7 @@ def publish_song(sid: str) -> dict:
         "language": lyr.get("language"),
         "lines": len(segments),
         "duration": meta.get("duration"),
+        "artist": meta.get("artist"),
     }
 
 

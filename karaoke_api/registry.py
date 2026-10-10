@@ -26,6 +26,8 @@ class Job:
     lang: str = "ru"
     lyrics_text: str = ""
     lyrics_url: str = ""
+    owner_id: str = ""
+    owner_name: str = ""
     state: str = "queued"
     stage: str = "queued"
     progress: int = 0
@@ -56,9 +58,11 @@ class JobRegistry:
         self._jobs: dict[str, Job] = {}
 
     def create(self, *, title: str, audio: str, lang: str = "ru",
-               lyrics_text: str = "", lyrics_url: str = "") -> Job:
+               lyrics_text: str = "", lyrics_url: str = "",
+               owner_id: str = "", owner_name: str = "") -> Job:
         job = Job(id=uuid.uuid4().hex[:12], title=title, audio=audio, lang=lang,
-                  lyrics_text=lyrics_text, lyrics_url=lyrics_url)
+                  lyrics_text=lyrics_text, lyrics_url=lyrics_url,
+                  owner_id=owner_id, owner_name=owner_name)
         with self._lock:
             self._cleanup_locked()
             self._jobs[job.id] = job
@@ -101,9 +105,11 @@ class PgJobRegistry(JobRegistry):
     """
 
     def create(self, *, title: str, audio: str, lang: str = "ru",
-               lyrics_text: str = "", lyrics_url: str = "") -> Job:
+               lyrics_text: str = "", lyrics_url: str = "",
+               owner_id: str = "", owner_name: str = "") -> Job:
         job = super().create(title=title, audio=audio, lang=lang,
-                             lyrics_text=lyrics_text, lyrics_url=lyrics_url)
+                             lyrics_text=lyrics_text, lyrics_url=lyrics_url,
+                             owner_id=owner_id, owner_name=owner_name)
         self._pg_write(job)
         self._pg_stale()
         return job
@@ -130,15 +136,17 @@ class PgJobRegistry(JobRegistry):
             log.warning("pg: не удалось пометить прерванные задачи", exc_info=True)
 
     def _pg_write(self, job: Job) -> None:
-        sql = ("INSERT INTO jobs (id, title, state, stage, progress, song_id, error, created, updated) "
-               "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) "
+        sql = ("INSERT INTO jobs (id, title, state, stage, progress, song_id, error, created, updated, owner_id, owner_name) "
+               "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
                "ON CONFLICT (id) DO UPDATE SET title=EXCLUDED.title, state=EXCLUDED.state, "
                "stage=EXCLUDED.stage, progress=EXCLUDED.progress, song_id=EXCLUDED.song_id, "
-               "error=EXCLUDED.error, updated=EXCLUDED.updated")
+               "error=EXCLUDED.error, updated=EXCLUDED.updated, "
+               "owner_id=EXCLUDED.owner_id, owner_name=EXCLUDED.owner_name")
         try:
             with db.pool().connection() as conn:
                 conn.execute(sql, (job.id, job.title, job.state, job.stage, job.progress,
-                                   job.song_id, job.error, job.created, job.updated))
+                                   job.song_id, job.error, job.created, job.updated,
+                                   job.owner_id, job.owner_name))
         except Exception:
             log.warning("pg: не удалось записать задачу %s", job.id, exc_info=True)
 
@@ -146,7 +154,7 @@ class PgJobRegistry(JobRegistry):
         try:
             with db.pool().connection() as conn:
                 row = conn.execute(
-                    "SELECT id, title, state, stage, progress, song_id, error, created, updated "
+                    "SELECT id, title, state, stage, progress, song_id, error, created, updated, owner_id, owner_name "
                     "FROM jobs WHERE id=%s", (job_id,)).fetchone()
         except Exception:
             log.warning("pg: не удалось прочитать задачу %s", job_id, exc_info=True)
@@ -155,7 +163,8 @@ class PgJobRegistry(JobRegistry):
             return None
         job = Job(id=row[0], title=row[1], audio="", state=row[2], stage=row[3],
                   progress=row[4], song_id=row[5], error=row[6],
-                  created=row[7], updated=row[8])
+                  created=row[7], updated=row[8],
+                  owner_id=row[9] or "", owner_name=row[10] or "")
         with self._lock:
             self._jobs[job.id] = job
         return job

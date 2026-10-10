@@ -18,11 +18,14 @@ def test_migrate_idempotent():
     with db.pool().connection() as conn:
         versions = [r[0] for r in conn.execute("SELECT version FROM schema_migrations")]
     assert "001_init" in versions
+    assert "002_owners" in versions
 
 
 def test_manifest_from_pg():
     songs.write_meta("beta-song", {"title": "Beta", "language": "ru",
-                                   "duration": 12.5, "lines": 3})
+                                   "duration": 12.5, "lines": 3,
+                                   "artist": "Beta Band",
+                                   "owner": {"id": "user-1", "name": "Биба"}})
     songs.write_meta("alpha-song", {"title": "Alpha", "language": "en",
                                     "duration": 7, "lines": 5})
     # флаги original/vocals выставляет publish по факту наличия mp3 в бакете
@@ -41,8 +44,13 @@ def test_manifest_from_pg():
         "language": "ru",
         "lines": 3,
         "duration": 12.5,
+        "artist": "Beta Band",
+        "owner_id": "user-1",
+        "owner_name": "Биба",
     }
     assert m["songs"][0]["original"] is None and m["songs"][0]["vocals"] is None
+    assert m["songs"][0]["artist"] is None
+    assert m["songs"][0]["owner_id"] is None
 
 
 def test_write_meta_partial_update():
@@ -60,7 +68,7 @@ def test_write_meta_partial_update():
 
 def test_job_registry_roundtrip():
     reg = PgJobRegistry(ttl_sec=3600)
-    job = reg.create(title="Трек", audio="music/x.mp3")
+    job = reg.create(title="Трек", audio="music/x.mp3", owner_id="user-1", owner_name="Биба")
     assert reg.get(job.id) is job
     reg.update(job.id, state="running", stage="lyrics", progress=40)
 
@@ -70,6 +78,7 @@ def test_job_registry_roundtrip():
     assert (loaded.title, loaded.state, loaded.stage, loaded.progress) == (
         "Трек", "running", "lyrics", 40)
     assert loaded.audio == ""  # в PG — только статус, не исходники
+    assert (loaded.owner_id, loaded.owner_name) == ("user-1", "Биба")
 
     reg.update(job.id, state="done", stage="done", progress=100, song_id="gamma-song")
     reg._jobs.clear()  # noqa: SLF001

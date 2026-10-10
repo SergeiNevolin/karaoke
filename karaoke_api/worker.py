@@ -18,10 +18,12 @@ _thread: threading.Thread | None = None
 
 
 def submit(*, title: str, audio, lang: str = "ru",
-           lyrics_text: str = "", lyrics_url: str = "") -> Job:
+           lyrics_text: str = "", lyrics_url: str = "",
+           owner_id: str = "", owner_name: str = "") -> Job:
     """Зарегистрировать задачу и поставить её в очередь."""
     job = registry.create(title=title, audio=audio, lang=lang,
-                          lyrics_text=lyrics_text, lyrics_url=lyrics_url)
+                          lyrics_text=lyrics_text, lyrics_url=lyrics_url,
+                          owner_id=owner_id, owner_name=owner_name)
     _queue.put(job.id)
     return job
 

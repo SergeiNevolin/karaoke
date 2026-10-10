@@ -77,7 +77,10 @@ def read_meta(sid: str) -> dict:
 def write_meta(sid: str, meta: dict) -> dict:
     meta = {**meta, "id": sid}
     write_json(song_key(sid, "meta.json"), meta)
+    owner = meta.get("owner") or {}
     catalog.upsert(sid, title=meta.get("title") or sid, language=meta.get("language"),
+                   artist=meta.get("artist"),
+                   owner_id=owner.get("id") or None, owner_name=owner.get("name") or None,
                    lines=meta.get("lines") or 0, duration=meta.get("duration") or 0,
                    source_sha1=(meta.get("source") or {}).get("sha1"),
                    created=meta.get("created"), updated=meta.get("updated"))
@@ -132,6 +135,30 @@ def validate_lyrics(data: dict) -> tuple[str | None, list, list]:
     return language, clean_segs, skips
 
 
+def check_owner(sid: str, sub: str | None) -> dict | None:
+    """Мета песни, если sub может её править/удалять, иначе None.
+
+    Владелец — загрузивший (owner.id из meta). Песни без владельца (легаси)
+    правит любой вошедший; гости — никто (их отсекает middleware).
+    """
+    meta = read_meta(sid)
+    if not meta:
+        return None
+    owner_id = (meta.get("owner") or {}).get("id")
+    if owner_id and sub != owner_id:
+        return None
+    return meta
+
+
+def delete_song(sid: str) -> bool:
+    """Удалить песню целиком: объекты в Silo + строка каталога. Нет песни — False."""
+    if not read_meta(sid):
+        return False
+    silo.delete_prefix(song_prefix(sid))
+    catalog.delete(sid)
+    return True
+
+
 def save_lyrics(sid: str, data: dict) -> dict:
     """Проверить, забэкапить, записать, обновить meta. Возвращает записанное."""
     language, segments, skips = validate_lyrics(data)
@@ -158,6 +185,26 @@ def save_lyrics(sid: str, data: dict) -> dict:
     return payload
 
 
+def set_song_meta(sid: str, title: str, artist: str | None) -> dict:
+    """Обновить название и автора песни. Нет песни — KeyError."""
+    title = (title or "").strip()
+    if not title:
+        raise ValueError("название не может быть пустым")
+    if artist is not None:
+        artist = artist.strip() or None
+    meta = read_meta(sid)
+    if not meta:
+        raise KeyError(f"нет песни {sid}")
+    meta["title"] = title
+    if artist:
+        meta["artist"] = artist
+    else:
+        meta.pop("artist", None)
+    meta["updated"] = now_iso()
+    write_meta(sid, meta)
+    return meta
+
+
 def manifest_entry(sid: str) -> dict | None:
     """Строка каталога для фронта (public-имена файлов).
 
@@ -176,6 +223,9 @@ def manifest_entry(sid: str) -> dict | None:
         "language": meta.get("language"),
         "lines": meta.get("lines", 0),
         "duration": meta.get("duration", 0),
+        "artist": meta.get("artist"),
+        "owner_id": (meta.get("owner") or {}).get("id"),
+        "owner_name": (meta.get("owner") or {}).get("name"),
     }
 
 

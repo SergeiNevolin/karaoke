@@ -11,9 +11,9 @@ from starlette.concurrency import run_in_threadpool
 
 from .. import silo
 from ..errors import ApiError
-from ..schemas import LyricsPut
+from ..schemas import LyricsPut, SongMetaPut
 from ..store.publish import publish_one
-from ..store.songs import build_manifest, read_lyrics, save_lyrics
+from ..store.songs import build_manifest, check_owner, delete_song, read_lyrics, read_meta, save_lyrics, set_song_meta
 
 log = logging.getLogger(__name__)
 
@@ -37,7 +37,12 @@ async def song_lyrics(sid: str) -> dict:
 
 
 @router.put("/api/songs/{sid}/lyrics")
-async def song_lyrics_put(sid: str, body: LyricsPut) -> dict:
+async def song_lyrics_put(sid: str, request: Request, body: LyricsPut) -> dict:
+    sub = getattr(request.state, "sub", None)
+    if check_owner(sid, sub) is None:
+        if not (await run_in_threadpool(read_meta, sid)):
+            raise ApiError(404, "Песня не найдена")
+        raise ApiError(403, "Править может только загрузивший песню")
     try:
         saved = await run_in_threadpool(save_lyrics, sid, body.model_dump())
     except KeyError:
@@ -52,6 +57,41 @@ async def song_lyrics_put(sid: str, body: LyricsPut) -> dict:
         log.exception("паблиш %s упал после сохранения", sid)
         return {"ok": True, "lines": lines, "warning": "Сохранено, но паблиш упал"}
     return {"ok": True, "lines": lines}
+
+
+@router.put("/api/songs/{sid}/meta")
+async def song_meta_put(sid: str, request: Request, body: SongMetaPut) -> dict:
+    """Обновить название и автора. Только владелец (легаси без владельца — любой вошедший)."""
+    sub = getattr(request.state, "sub", None)
+    if check_owner(sid, sub) is None:
+        if not (await run_in_threadpool(read_meta, sid)):
+            raise ApiError(404, "Песня не найдена")
+        raise ApiError(403, "Править может только загрузивший песню")
+    try:
+        meta = await run_in_threadpool(set_song_meta, sid, body.title, body.artist)
+    except KeyError:
+        raise ApiError(404, "Песня не найдена") from None
+    except ValueError as e:
+        raise ApiError(400, str(e)) from e
+    try:
+        await run_in_threadpool(publish_one, sid)
+    except Exception:
+        log.exception("паблиш %s упал после сохранения меты", sid)
+    return {"ok": True, "title": meta.get("title"), "artist": meta.get("artist")}
+
+
+@router.delete("/api/songs/{sid}")
+async def song_delete(sid: str, request: Request) -> dict:
+    """Удалить песню целиком. Только владелец (легаси без владельца — любой вошедший)."""
+    sub = getattr(request.state, "sub", None)
+    if check_owner(sid, sub) is None:
+        if not (await run_in_threadpool(read_meta, sid)):
+            raise ApiError(404, "Песня не найдена")
+        raise ApiError(403, "Удалить может только загрузивший песню")
+    ok = await run_in_threadpool(delete_song, sid)
+    if not ok:
+        raise ApiError(404, "Песня не найдена")
+    return {"ok": True}
 
 
 def _content_type(rel: str) -> str:

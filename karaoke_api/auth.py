@@ -72,6 +72,9 @@ def install_auth(app: FastAPI) -> None:
         secret = config.AUTH_JWT_SECRET
         token = _extract_token(request)
         claims = _decode(token, secret) if (secret and token) else None
+        # Кладём в state, чтобы эндпоинты знали автора (владелец песни).
+        request.state.claims = claims
+        request.state.sub = claims.get("sub") if claims else None
         # чтение открыто без входа; запись (upload, правка текстов) — только с JWT
         if secret and claims is None and _needs_auth(path) \
                 and request.method not in _SAFE_METHODS:

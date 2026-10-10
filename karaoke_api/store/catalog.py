@@ -16,7 +16,8 @@ def manifest_rows() -> list[dict]:
     """Строки каталога в форме манифеста API, сортировка по lower(title)."""
     with db.pool().connection() as conn:
         rows = conn.execute(
-            "SELECT id, title, language, lines, duration, has_original, has_vocals "
+            "SELECT id, title, language, lines, duration, has_original, has_vocals, "
+            "artist, owner_id, owner_name "
             "FROM songs ORDER BY lower(title)"
         ).fetchall()
     return [
@@ -29,9 +30,21 @@ def manifest_rows() -> list[dict]:
             "language": r[2],
             "lines": r[3],
             "duration": r[4],
+            "artist": r[7],
+            "owner_id": r[8],
+            "owner_name": r[9],
         }
         for r in rows
     ]
+
+
+def delete(sid: str) -> None:
+    """Убрать песню из производного каталога (best-effort, как upsert)."""
+    try:
+        with db.pool().connection() as conn:
+            conn.execute("DELETE FROM songs WHERE id = %s", (sid,))
+    except Exception:
+        log.exception("pg: не удалось удалить песню %s", sid)
 
 
 def upsert(sid: str, *, strict: bool = False, **fields) -> None:

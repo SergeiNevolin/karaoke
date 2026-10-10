@@ -5,7 +5,7 @@ import os
 import tempfile
 from pathlib import Path
 
-from fastapi import APIRouter, File, Form, UploadFile
+from fastapi import APIRouter, File, Form, Request, UploadFile
 from starlette.concurrency import run_in_threadpool
 
 from .. import silo, worker
@@ -40,10 +40,12 @@ def _unique_music_key(stem: str, ext: str) -> tuple[str, int]:
 
 @router.post("/api/upload")
 async def upload(
+    request: Request,
     file: UploadFile = File(...),
     lang: str = Form("ru"),
     lyrics_text: str = Form(""),
     lyrics_url: str = Form(""),
+    owner_name: str = Form(""),
 ) -> dict:
     ext = Path(file.filename or "").suffix.lower()
     if ext not in ALLOWED_EXT:
@@ -81,9 +83,14 @@ async def upload(
     finally:
         os.unlink(tmp_name)
 
+    # Имя — только для показа (display-only): границей прав служит проверенный sub.
+    # Обрезаем и режем длину, чтобы не тащить мусор из формы в канон.
+    owner_name = owner_name.strip()[:100]
     job = worker.submit(
         title=title, audio=key, lang=lang,
         lyrics_text=lyrics_text[:MAX_LYRICS_TEXT], lyrics_url=lyrics_url[:MAX_LYRICS_URL],
+        owner_id=getattr(request.state, "sub", None) or "",
+        owner_name=owner_name,
     )
     return {"jobId": job.id}
 

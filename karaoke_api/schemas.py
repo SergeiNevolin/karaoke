@@ -29,3 +29,10 @@ class LyricsPut(BaseModel):
     language: str | None = None
     segments: list[Segment]
     skips: list[SkipRange] = Field(default_factory=list)
+
+
+class SongMetaPut(BaseModel):
+    """PUT /api/songs/{id}/meta: название и автор (только владелец)."""
+
+    title: str = Field(min_length=1, max_length=200)
+    artist: str | None = Field(default=None, max_length=200)

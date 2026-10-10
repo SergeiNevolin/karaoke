@@ -123,6 +123,128 @@ def test_upload_valid_token_passes_auth(client):
     assert r.status_code == 400
 
 
+def owned():
+    write_meta("owned", {"title": "Чужая", "language": "ru", "duration": 5,
+                         "owner": {"id": "user-1", "name": "Биба"}})
+
+
+def test_put_lyrics_owner_ok(client):
+    owned()
+    r = client.put("/api/songs/owned/lyrics", json=LYRICS, headers=bearer(make_token(sub="user-1")))
+    assert r.status_code == 200
+    assert r.json().get("ok")
+
+
+def test_put_lyrics_stranger_403(client):
+    owned()
+    r = client.put("/api/songs/owned/lyrics", json=LYRICS, headers=bearer(make_token(sub="user-2")))
+    assert r.status_code == 403
+    assert r.json() == {"error": "Править может только загрузивший песню"}
+
+
+def test_put_lyrics_legacy_ownerless_ok(client):
+    r = put_lyrics(client, headers=bearer(make_token(sub="user-9")))
+    assert r.status_code == 200
+
+
+def test_put_lyrics_missing_404(client):
+    r = client.put("/api/songs/nope/lyrics", json=LYRICS, headers=bearer(make_token()))
+    assert r.status_code == 404
+
+
+def test_put_meta_owner_ok(client):
+    owned()
+    r = client.put("/api/songs/owned/meta", json={"title": "Новое название", "artist": "Новый автор"},
+                   headers=bearer(make_token(sub="user-1")))
+    assert r.status_code == 200
+    assert r.json()["title"] == "Новое название"
+    assert r.json()["artist"] == "Новый автор"
+    row = next(s for s in client.get("/api/songs").json()["songs"] if s["id"] == "owned")
+    assert row["title"] == "Новое название" and row["artist"] == "Новый автор"
+
+
+def test_put_meta_stranger_403(client):
+    owned()
+    r = client.put("/api/songs/owned/meta", json={"title": "Хак", "artist": None},
+                   headers=bearer(make_token(sub="user-2")))
+    assert r.status_code == 403
+
+
+def test_put_meta_legacy_ownerless_ok(client):
+    r = client.put("/api/songs/t/meta", json={"title": "Переименована", "artist": None},
+                   headers=bearer(make_token(sub="user-9")))
+    assert r.status_code == 200
+    assert r.json()["title"] == "Переименована"
+
+
+def test_put_meta_missing_404(client):
+    r = client.put("/api/songs/nope/meta", json={"title": "Х", "artist": None},
+                   headers=bearer(make_token()))
+    assert r.status_code == 404
+
+
+def test_put_meta_empty_title_400(client):
+    owned()
+    r = client.put("/api/songs/owned/meta", json={"title": "   ", "artist": None},
+                   headers=bearer(make_token(sub="user-1")))
+    assert r.status_code == 400
+
+
+def test_put_meta_clears_artist(client):
+    owned()
+    assert client.put("/api/songs/owned/meta", json={"title": "Чужая", "artist": "Кто-то"},
+                      headers=bearer(make_token(sub="user-1"))).status_code == 200
+    r = client.put("/api/songs/owned/meta", json={"title": "Чужая", "artist": None},
+                   headers=bearer(make_token(sub="user-1")))
+    assert r.json()["artist"] is None
+
+
+def test_delete_owner_ok(client):
+    owned()
+    r = client.delete("/api/songs/owned", headers=bearer(make_token(sub="user-1")))
+    assert r.status_code == 200
+    assert r.json() == {"ok": True}
+    assert client.get("/api/songs/owned/lyrics").status_code == 404
+    assert "owned" not in [s["id"] for s in client.get("/api/songs").json()["songs"]]
+
+
+def test_delete_stranger_403(client):
+    owned()
+    r = client.delete("/api/songs/owned", headers=bearer(make_token(sub="user-2")))
+    assert r.status_code == 403
+
+
+def test_delete_missing_404(client):
+    assert client.delete("/api/songs/nope", headers=bearer(make_token())).status_code == 404
+
+
+def test_delete_without_token_401(client):
+    owned()
+    assert client.delete("/api/songs/owned").status_code == 401
+
+
+def test_manifest_has_artist_owner(client):
+    owned()
+    row = next(s for s in client.get("/api/songs").json()["songs"] if s["id"] == "owned")
+    assert row["owner_id"] == "user-1" and row["owner_name"] == "Биба"
+
+
+def test_upload_captures_owner(client, monkeypatch):
+    import karaoke_api.worker as worker_mod
+    from karaoke_api.registry import Job
+    seen = {}
+
+    def fake_submit(**kw):
+        seen.update(kw)
+        return Job(id="job1", title=kw["title"], audio=kw["audio"])
+
+    monkeypatch.setattr(worker_mod, "submit", fake_submit)
+    r = client.post("/api/upload", files={"file": ("Песня.mp3", b"AAA")},
+                    data={"owner_name": "  Биба  "}, headers=bearer(make_token(sub="user-7")))
+    assert r.status_code == 200
+    assert seen["owner_id"] == "user-7" and seen["owner_name"] == "Биба"
+
+
 def test_static_open_without_token(client):
     silo.put("songs/t/minus.mp3", b"mp3-bytes")
     assert client.get("/songs/t/minus.mp3").status_code == 200
