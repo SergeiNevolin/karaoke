@@ -136,7 +136,8 @@ class PgJobRegistry(JobRegistry):
             log.warning("pg: не удалось пометить прерванные задачи", exc_info=True)
 
     def _pg_write(self, job: Job) -> None:
-        sql = ("INSERT INTO jobs (id, title, state, stage, progress, song_id, error, created, updated, owner_id, owner_name) "
+        sql = ("INSERT INTO jobs (id, title, state, stage, progress, song_id, error, created, updated, "
+               "owner_id, owner_name) "
                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
                "ON CONFLICT (id) DO UPDATE SET title=EXCLUDED.title, state=EXCLUDED.state, "
                "stage=EXCLUDED.stage, progress=EXCLUDED.progress, song_id=EXCLUDED.song_id, "
@@ -154,7 +155,8 @@ class PgJobRegistry(JobRegistry):
         try:
             with db.pool().connection() as conn:
                 row = conn.execute(
-                    "SELECT id, title, state, stage, progress, song_id, error, created, updated, owner_id, owner_name "
+                    "SELECT id, title, state, stage, progress, song_id, error, created, updated, "
+                    "owner_id, owner_name "
                     "FROM jobs WHERE id=%s", (job_id,)).fetchone()
         except Exception:
             log.warning("pg: не удалось прочитать задачу %s", job_id, exc_info=True)

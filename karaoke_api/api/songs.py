@@ -13,7 +13,15 @@ from .. import silo
 from ..errors import ApiError
 from ..schemas import LyricsPut, SongMetaPut
 from ..store.publish import publish_one
-from ..store.songs import build_manifest, check_owner, delete_song, read_lyrics, read_meta, save_lyrics, set_song_meta
+from ..store.songs import (
+    build_manifest,
+    check_owner,
+    delete_song,
+    read_lyrics,
+    read_meta,
+    save_lyrics,
+    set_song_meta,
+)
 
 log = logging.getLogger(__name__)
 
