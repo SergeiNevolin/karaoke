@@ -28,6 +28,14 @@ def test_songs_from_store(client):
     assert songs[0]["audio"] == "songs/t/minus.mp3"
 
 
+def test_songs_limit_offset(client):
+    assert client.get("/api/songs?limit=1").json()["songs"][0]["id"] == "t"
+    assert client.get("/api/songs?limit=1&offset=1").json()["songs"] == []
+    # Кламп: отрицательные и огромные значения не роняют ручку.
+    assert client.get("/api/songs?limit=-5&offset=-2").status_code == 200
+    assert client.get("/api/songs?limit=99999").json()["songs"][0]["id"] == "t"
+
+
 def test_lyrics_roundtrip(client):
     got = client.get("/api/songs/t/lyrics").json()
     assert len(got["segments"]) == 1

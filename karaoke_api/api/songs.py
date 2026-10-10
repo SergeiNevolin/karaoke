@@ -32,8 +32,10 @@ _CHUNK = 64 * 1024
 
 
 @router.get("/api/songs")
-async def songs() -> dict:
-    return await run_in_threadpool(build_manifest)
+async def songs(limit: int = 200, offset: int = 0) -> dict:
+    limit = max(0, min(limit, 500))
+    offset = max(0, offset)
+    return await run_in_threadpool(build_manifest, limit, offset)
 
 
 @router.get("/api/songs/{sid}/lyrics")

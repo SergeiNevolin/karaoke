@@ -100,6 +100,15 @@ def test_manifest():
     assert manifest_entry("nope") is None
 
 
+def test_manifest_limit_offset():
+    _song("b", title="Яя")
+    _song("a", title="Аа")
+    _song("c", title="Вв")
+    assert [s["id"] for s in build_manifest(limit=2)["songs"]] == ["a", "c"]
+    assert [s["id"] for s in build_manifest(limit=2, offset=2)["songs"]] == ["b"]
+    assert build_manifest(limit=2, offset=9)["songs"] == []
+
+
 def test_manifest_vocals_flag():
     """Ссылка на mp3 — только когда сам mp3 лежит в бакете (wav не считается)."""
     _song("a")

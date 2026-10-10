@@ -12,13 +12,17 @@ from karaoke_api import db
 log = logging.getLogger(__name__)
 
 
-def manifest_rows() -> list[dict]:
-    """Строки каталога в форме манифеста API, сортировка по lower(title)."""
+def manifest_rows(limit: int = 200, offset: int = 0) -> list[dict]:
+    """Строки каталога в форме манифеста API, сортировка по lower(title).
+
+    Чанки: limit/offset режут выдачу (дефолт покрывает витрины, полный список —
+    явным ?limit=)."""
     with db.pool().connection() as conn:
         rows = conn.execute(
             "SELECT id, title, language, lines, duration, has_original, has_vocals, "
             "artist, owner_id, owner_name "
-            "FROM songs ORDER BY lower(title)"
+            "FROM songs ORDER BY lower(title) LIMIT %s OFFSET %s",
+            (limit, offset),
         ).fetchall()
     return [
         {

@@ -229,9 +229,9 @@ def manifest_entry(sid: str) -> dict | None:
     }
 
 
-def build_manifest() -> dict:
+def build_manifest(limit: int = 200, offset: int = 0) -> dict:
     """Каталог для фронта — из PG (без запроса к Silo на каждую строку)."""
-    return {"songs": catalog.manifest_rows()}
+    return {"songs": catalog.manifest_rows(limit, offset)}
 
 
 def sha1_of(path) -> str:
