@@ -199,6 +199,80 @@ def test_put_meta_clears_artist(client):
     assert r.json()["artist"] is None
 
 
+def png_bytes(color=(200, 30, 30)):
+    import io
+
+    from PIL import Image
+
+    img = Image.new("RGB", (16, 12), color)
+    buf = io.BytesIO()
+    img.save(buf, "PNG")
+    return buf.getvalue()
+
+
+def put_cover(client, sid="owned", data=None, filename="cover.png", **kw):
+    return client.put(f"/api/songs/{sid}/cover",
+                      files={"file": (filename, data or png_bytes(), "image/png")}, **kw)
+
+
+def test_put_cover_owner_ok(client):
+    owned()
+    r = put_cover(client, headers=bearer(make_token(sub="user-1")))
+    assert r.status_code == 200
+    assert r.json()["cover"] == "songs/owned/cover.jpg"
+    row = next(s for s in client.get("/api/songs").json()["songs"] if s["id"] == "owned")
+    assert row["cover"] == "songs/owned/cover.jpg"
+    # Статика отдаёт JPEG.
+    got = client.get("/songs/owned/cover.jpg")
+    assert got.status_code == 200
+    assert got.headers["content-type"] == "image/jpeg"
+    assert got.content[:2] == b"\xff\xd8"
+
+
+def test_put_cover_stranger_403(client):
+    owned()
+    r = put_cover(client, headers=bearer(make_token(sub="user-2")))
+    assert r.status_code == 403
+
+
+def test_put_cover_legacy_ownerless_ok(client):
+    r = put_cover(client, sid="t", headers=bearer(make_token(sub="user-9")))
+    assert r.status_code == 200
+
+
+def test_put_cover_missing_404(client):
+    r = put_cover(client, sid="nope", headers=bearer(make_token()))
+    assert r.status_code == 404
+
+
+def test_put_cover_bad_file_400(client):
+    owned()
+    r = put_cover(client, data=b"not-an-image", headers=bearer(make_token(sub="user-1")))
+    assert r.status_code == 400
+
+
+def test_put_cover_bad_ext_400(client):
+    owned()
+    r = put_cover(client, filename="cover.txt", headers=bearer(make_token(sub="user-1")))
+    assert r.status_code == 400
+
+
+def test_delete_cover_owner_ok(client):
+    owned()
+    assert put_cover(client, headers=bearer(make_token(sub="user-1"))).status_code == 200
+    r = client.delete("/api/songs/owned/cover", headers=bearer(make_token(sub="user-1")))
+    assert r.status_code == 200
+    row = next(s for s in client.get("/api/songs").json()["songs"] if s["id"] == "owned")
+    assert row["cover"] is None
+    assert client.get("/songs/owned/cover.jpg").status_code == 404
+
+
+def test_delete_cover_stranger_403(client):
+    owned()
+    r = client.delete("/api/songs/owned/cover", headers=bearer(make_token(sub="user-2")))
+    assert r.status_code == 403
+
+
 def test_delete_owner_ok(client):
     owned()
     r = client.delete("/api/songs/owned", headers=bearer(make_token(sub="user-1")))

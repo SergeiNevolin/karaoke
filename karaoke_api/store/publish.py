@@ -99,6 +99,7 @@ def publish_song(sid: str) -> dict:
     if original_rel is None:
         log.warning("%s: original.mp3 отсутствует (старый бандл?)", title)
     vocals_rel = _rel_if(sid, "vocals.mp3")
+    cover_rel = _rel_if(sid, "cover.jpg")
     _ensure_waveform(sid, title)
 
     catalog.upsert(sid, title=meta.get("title") or sid, language=meta.get("language"),
@@ -107,6 +108,7 @@ def publish_song(sid: str) -> dict:
                    owner_name=(meta.get("owner") or {}).get("name"),
                    lines=meta.get("lines") or 0, duration=meta.get("duration") or 0,
                    has_original=original_rel is not None, has_vocals=vocals_rel is not None,
+                   has_cover=cover_rel is not None,
                    source_sha1=(meta.get("source") or {}).get("sha1"),
                    created=meta.get("created"), updated=meta.get("updated"))
 
@@ -116,6 +118,7 @@ def publish_song(sid: str) -> dict:
         "audio": f"songs/{sid}/minus.mp3",
         "original": original_rel,
         "vocals": vocals_rel,
+        "cover": cover_rel,
         "language": lyr.get("language"),
         "lines": len(segments),
         "duration": meta.get("duration"),

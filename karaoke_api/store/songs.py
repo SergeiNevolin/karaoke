@@ -27,6 +27,8 @@ import math
 import re
 from datetime import datetime
 
+from PIL import Image
+
 from karaoke_api import silo
 from karaoke_api.store import catalog
 from karaoke_api.utils import now_iso
@@ -205,6 +207,48 @@ def set_song_meta(sid: str, title: str, artist: str | None) -> dict:
     return meta
 
 
+COVER_MAX_MB = 5
+COVER_SIZE = 1000
+
+
+def save_cover(sid: str, data: bytes) -> dict:
+    """Обложка песни: проверка, ресайз до 1000px, JPEG в Silo, флаг в каталог.
+
+    Нет песни — KeyError; мусор вместо картинки или перевес — ValueError.
+    """
+    if not read_meta(sid):
+        raise KeyError(f"нет песни {sid}")
+    if len(data) > COVER_MAX_MB * 1024 * 1024:
+        raise ValueError(f"обложка больше {COVER_MAX_MB} МБ")
+    import io
+    try:
+        img = Image.open(io.BytesIO(data))
+        img.load()
+    except Exception as e:
+        raise ValueError("не картинка") from e
+    if img.mode in ("RGBA", "LA", "PA"):
+        bg = Image.new("RGB", img.size, (0, 0, 0))
+        bg.paste(img, mask=img.split()[-1])
+        img = bg
+    else:
+        img = img.convert("RGB")
+    img.thumbnail((COVER_SIZE, COVER_SIZE), Image.LANCZOS)
+    buf = io.BytesIO()
+    img.save(buf, "JPEG", quality=85)
+    silo.put(song_key(sid, "cover.jpg"), buf.getvalue(), "image/jpeg")
+    catalog.upsert(sid, has_cover=True)
+    return {"cover": f"songs/{sid}/cover.jpg"}
+
+
+def delete_cover(sid: str) -> bool:
+    """Убрать обложку: объект в Silo + флаг каталога. Нет песни — False."""
+    if not read_meta(sid):
+        return False
+    silo.delete(song_key(sid, "cover.jpg"))
+    catalog.upsert(sid, has_cover=False)
+    return True
+
+
 def manifest_entry(sid: str) -> dict | None:
     """Строка каталога для фронта (public-имена файлов).
 
@@ -226,6 +270,7 @@ def manifest_entry(sid: str) -> dict | None:
         "artist": meta.get("artist"),
         "owner_id": (meta.get("owner") or {}).get("id"),
         "owner_name": (meta.get("owner") or {}).get("name"),
+        "cover": f"songs/{sid}/cover.jpg" if silo.exists(song_key(sid, "cover.jpg")) else None,
     }
 
 

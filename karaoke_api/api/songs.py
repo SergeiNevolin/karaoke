@@ -4,8 +4,9 @@ from __future__ import annotations
 import logging
 import mimetypes
 from email.utils import formatdate
+from pathlib import Path
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, File, Request, UploadFile
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from starlette.concurrency import run_in_threadpool
 
@@ -16,9 +17,11 @@ from ..store.publish import publish_one
 from ..store.songs import (
     build_manifest,
     check_owner,
+    delete_cover,
     delete_song,
     read_lyrics,
     read_meta,
+    save_cover,
     save_lyrics,
     set_song_meta,
 )
@@ -101,6 +104,54 @@ async def song_delete(sid: str, request: Request) -> dict:
     ok = await run_in_threadpool(delete_song, sid)
     if not ok:
         raise ApiError(404, "Песня не найдена")
+    return {"ok": True}
+
+
+COVER_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
+
+
+@router.put("/api/songs/{sid}/cover")
+async def song_cover_put(sid: str, request: Request, file: UploadFile = File(...)) -> dict:
+    """Поставить обложку: квадрат до 1000px, JPEG. Только владелец."""
+    sub = getattr(request.state, "sub", None)
+    if check_owner(sid, sub) is None:
+        if not (await run_in_threadpool(read_meta, sid)):
+            raise ApiError(404, "Песня не найдена")
+        raise ApiError(403, "Править может только загрузивший песню")
+    ext = Path(file.filename or "").suffix.lower()
+    if ext not in COVER_EXTS:
+        raise ApiError(400, f"Нужна картинка {sorted(COVER_EXTS)}, а не {ext or '???'}")
+    data = await file.read()
+    if not data:
+        raise ApiError(400, "Пустой файл")
+    try:
+        saved = await run_in_threadpool(save_cover, sid, data)
+    except KeyError:
+        raise ApiError(404, "Песня не найдена") from None
+    except ValueError as e:
+        raise ApiError(400, str(e)) from e
+    try:
+        await run_in_threadpool(publish_one, sid)
+    except Exception:
+        log.exception("паблиш %s упал после обложки", sid)
+    return {"ok": True, "cover": saved["cover"]}
+
+
+@router.delete("/api/songs/{sid}/cover")
+async def song_cover_delete(sid: str, request: Request) -> dict:
+    """Убрать обложку. Только владелец."""
+    sub = getattr(request.state, "sub", None)
+    if check_owner(sid, sub) is None:
+        if not (await run_in_threadpool(read_meta, sid)):
+            raise ApiError(404, "Песня не найдена")
+        raise ApiError(403, "Править может только загрузивший песню")
+    ok = await run_in_threadpool(delete_cover, sid)
+    if not ok:
+        raise ApiError(404, "Песня не найдена")
+    try:
+        await run_in_threadpool(publish_one, sid)
+    except Exception:
+        log.exception("паблиш %s упал после удаления обложки", sid)
     return {"ok": True}
 
 

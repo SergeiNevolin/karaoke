@@ -20,7 +20,7 @@ def manifest_rows(limit: int = 200, offset: int = 0) -> list[dict]:
     with db.pool().connection() as conn:
         rows = conn.execute(
             "SELECT id, title, language, lines, duration, has_original, has_vocals, "
-            "artist, owner_id, owner_name "
+            "artist, owner_id, owner_name, has_cover "
             "FROM songs ORDER BY lower(title) LIMIT %s OFFSET %s",
             (limit, offset),
         ).fetchall()
@@ -37,6 +37,7 @@ def manifest_rows(limit: int = 200, offset: int = 0) -> list[dict]:
             "artist": r[7],
             "owner_id": r[8],
             "owner_name": r[9],
+            "cover": f"songs/{r[0]}/cover.jpg" if r[10] else None,
         }
         for r in rows
     ]

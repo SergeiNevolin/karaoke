@@ -19,6 +19,7 @@ def test_migrate_idempotent():
         versions = [r[0] for r in conn.execute("SELECT version FROM schema_migrations")]
     assert "001_init" in versions
     assert "002_owners" in versions
+    assert "003_covers" in versions
 
 
 def test_manifest_from_pg():
@@ -47,10 +48,12 @@ def test_manifest_from_pg():
         "artist": "Beta Band",
         "owner_id": "user-1",
         "owner_name": "Биба",
+        "cover": None,
     }
     assert m["songs"][0]["original"] is None and m["songs"][0]["vocals"] is None
     assert m["songs"][0]["artist"] is None
     assert m["songs"][0]["owner_id"] is None
+    assert m["songs"][0]["cover"] is None
 
 
 def test_write_meta_partial_update():
