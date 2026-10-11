@@ -1,5 +1,7 @@
 # karaoke_ml_service — GPU-микросервис (Demucs + Whisper + CREPE)
 
+python -m uvicorn karaoke_ml_service.app:app --host 0.0.0.0 --port 8001
+
 Отдельный процесс на машине с видеокартой. Основной бэкенд (`karaoke_api/`)
 ходит сюда по HTTP, когда задан `GPU_URL`.
 

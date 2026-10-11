@@ -108,6 +108,18 @@ def test_static_missing_404(client):
     assert client.get("/songs/nope/x.mp3").status_code == 404
 
 
+def test_static_cache_json_no_cache(client):
+    # lyrics.json правится через PUT из редактора: долгий кэш показывал
+    # старые данные при повторном открытии. mp3 иммутабельны — им длинный кэш.
+    silo.put("songs/t/lyrics.json", b'{"segments": []}')
+    r = client.get("/songs/t/lyrics.json")
+    assert r.status_code == 200
+    assert r.headers["cache-control"] == "no-cache"
+    silo.put("songs/t/minus.mp3", b"0123456789")
+    r = client.get("/songs/t/minus.mp3")
+    assert r.headers["cache-control"] == "public, max-age=3600"
+
+
 def test_static_bad_range_416(client):
     silo.put("songs/t/minus.mp3", b"0123456789")
     r = client.get("/songs/t/minus.mp3", headers={"Range": "bytes=99-199"})

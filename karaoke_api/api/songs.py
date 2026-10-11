@@ -203,10 +203,15 @@ async def song_static(rel: str, request: Request):
 
 
 def _base_headers(rel: str, head: dict | None) -> dict:
+    # lyrics.json правится через PUT из редактора — долгий кэш здесь
+    # показывал старые данные при повторном открытии (фронт чинит своим
+    # no-store, но мутабельный ресурс и с сервера кэшировать нельзя).
+    # mp3/wav иммутабельны — им оставляем часовой кэш.
+    cache = "no-cache" if rel.endswith(".json") else "public, max-age=3600"
     headers = {
         "Content-Type": _content_type(rel),
         "Accept-Ranges": "bytes",
-        "Cache-Control": "public, max-age=3600",
+        "Cache-Control": cache,
     }
     if head is not None:
         headers["Content-Length"] = str(head["size"])
