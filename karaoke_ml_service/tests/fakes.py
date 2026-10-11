@@ -69,14 +69,35 @@ class FakeAligner:
     def __init__(self, **kwargs):
         self.init_kwargs = kwargs
         self.calls: list[tuple[Path, str | None]] = []
+        self.ctc_calls: list[tuple[float, list]] = []
         self.closed = False
 
     def align(self, vocals: Path, segments: list, lang: str | None = None) -> list:
         self.calls.append((Path(vocals), lang))
         return segments
 
+    def ctc_align_text(self, audio_slice, offset: float,
+                       tokens: list[str]) -> list[tuple[str, float, float, float]]:
+        """Детерминированный CTC-стаб: равномерно по 0.4с/слово, conf 0.95."""
+        self.ctc_calls.append((offset, list(tokens)))
+        out = []
+        t = float(offset)
+        for tok in tokens:
+            out.append((tok, round(t, 3), round(t + 0.4, 3), 0.95))
+            t += 0.4
+        return out
+
     def close(self) -> None:
         self.closed = True
+
+
+class FakeAlignerNoCtc(FakeAligner):
+    """Алайнер без CTC (нет transformers): ctc_align_text пуст — v2 идёт в fallback."""
+
+    def ctc_align_text(self, audio_slice, offset: float,
+                       tokens: list[str]) -> list[tuple[str, float, float, float]]:
+        self.ctc_calls.append((offset, list(tokens)))
+        return []
 
 
 class BoomPipeline:

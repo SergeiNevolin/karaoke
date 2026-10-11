@@ -12,9 +12,12 @@
   колбэк прогресса (ключи синхронны с `karaoke_api.config.STAGE_LABELS`).
   Align живёт внутри стадии `lyrics` (отдельного ключа нет): после Whisper
   границы слов перерасставляются forced alignment'ом
-  (`core/align.py:WordAligner` — CTC wav2vec2 XLSR + onset-снап), и только
-  потом накладывается свой текст (наследующий уже точные якоря).
-  Отключается env `ALIGN_ENABLED=0`.
+  (`core/align.py:WordAligner` — CTC wav2vec2 XLSR + onset-снап).
+  Приложенный текст (`lyrics_text`) только правит слова
+  (`core/custom_align.py`: тайминги слов Whisper заморожены и копируются
+  как есть, текст подменяется глобальным монотонным выравниванием на
+  уровне слов; сегменты — строки пользователя).
+  Отключение всего выравнивания — env `ALIGN_ENABLED=0`.
 - `jobs.py` — `Job`/`JobRegistry`: состояние в памяти, результат на диске,
   TTL-очистка завершённых задач (`RESULT_TTL_SEC`).
 - `config.py` — пути, лимиты, имена моделей, `STAGE_PROGRESS`, `LOG_LEVEL`.
@@ -31,7 +34,11 @@
   `KaraokePipeline`. Внутренности `core/` (DP-логика наложения текста,
   метрики скоринга) — вне объёма рефакторинга.
 - `tests/` — контракты endpoints, жизненный цикл задач, классы-обёртки;
-  `fakes.py` — фейковые шаги, тесты идут без torch/моделей.
+  `fakes.py` — фейковые шаги, тесты идут без torch/моделей;
+  `eval_lyrics.py` (`python -m karaoke_ml_service.eval_lyrics --gold gold.json
+  --hyp v1.json --hyp v2.json`) — скоринг таймингов слов против выверенного
+  gold (покрытие, медиана/p95 |сдвига|, доля >200мс), `tests/gold_sample.json` —
+  минимальный пример формата.
 - `Dockerfile` — сборка из корня репо (см. комментарий внутри).
 
 Клиент (`GpuClient`) живёт в основном бэкенде: `karaoke_api/gpu_client.py`

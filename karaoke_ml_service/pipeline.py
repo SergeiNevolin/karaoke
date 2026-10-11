@@ -19,7 +19,8 @@ from .config import (
     WHISPER_MODEL,
 )
 from .core.align import WordAligner
-from .core.lyrics import apply_text_to_segments, clean_lines
+from .core.custom_align import align_custom_text
+from .core.lyrics import clean_lines
 from .core.pitch import PitchExtractor
 from .core.separate import VocalSeparator
 from .core.transcribe import Transcriber
@@ -130,43 +131,47 @@ class KaraokePipeline:
             tr, owned = Transcriber(model=WHISPER_MODEL), True
         try:
             data = tr.transcribe(vocals, lang=lang)
-            data = self._refine_timing(vocals, data, lang=lang)
-            if text.strip():
-                segments, stats = apply_text_to_segments(
-                    data.get("segments", []), clean_lines(text))
-                data = {"language": data.get("language"), "segments": segments}
-                log.info("наложение своего текста: %s", stats)
-            return data
+            return self._with_alignment(vocals, data, lang=lang, text=text)
         finally:
             if owned:
                 tr.close()
 
-    def _refine_timing(self, vocals: Path, data: dict, *, lang: str) -> dict:
-        """Второй проход таймингов (forced alignment) внутри стадии lyrics.
+    def _get_aligner(self):
+        """Инжектированный или свой (свой закрывает вызыватель). Возвращает (aligner, owned)."""
+        if self._aligner is not None:
+            return self._aligner, False
+        return WordAligner(model=ALIGN_MODEL, snap_window=ALIGN_WINDOW_SEC,
+                           min_conf=ALIGN_MIN_CONF), True
+
+    def _with_alignment(self, vocals: Path, data: dict, *, lang: str, text: str) -> dict:
+        """Тайминги слов + правка слов приложенным текстом (всё внутри стадии lyrics).
 
         Отдельного ключа стадий нет — фронт видит те же STAGE_PROGRESS.
-        Любая ошибка алайнера -> whisper-тайминги как есть (не роняем задачу).
+        Тайминги слов Whisper не меняются; правится только текст слов.
+        Любая ошибка -> whisper как есть (задачу не роняем).
         """
-        if not self.enable_align:
-            return data
         segments = data.get("segments", []) or []
-        if not segments:
+        if not segments or not self.enable_align:
             return data
-        if self._aligner is not None:
-            try:
-                data = {**data, "segments": self._aligner.align(vocals, segments, lang=lang)}
-            except Exception:
-                log.exception("инжектированный алайнер упал, оставляю whisper")
-            return data
-        aligner = WordAligner(model=ALIGN_MODEL, snap_window=ALIGN_WINDOW_SEC,
-                              min_conf=ALIGN_MIN_CONF)
+        lines = clean_lines(text) if text.strip() else []
+        aligner, owned_al = self._get_aligner()
         try:
-            data = {**data, "segments": aligner.align(vocals, segments, lang=lang)}
-        except Exception:
-            log.exception("align упал, оставляю whisper-тайминги")
+            try:
+                data = {**data, "segments": aligner.align(vocals, segments, lang=lang)}
+            except Exception:
+                log.exception("алайнер слов упал, оставляю whisper")
+            if not lines:
+                return data
+            try:
+                out, stats = align_custom_text(data, lines)
+            except Exception:
+                log.exception("правка слов упала — whisper как есть")
+                return data
+            log.info("правка слов приложенным текстом: %s", stats)
+            return {**data, "segments": out}
         finally:
-            aligner.close()
-        return data
+            if owned_al:
+                aligner.close()
 
     def _pitch_of(self, vocals: Path) -> dict:
         owned = self._pitch is None

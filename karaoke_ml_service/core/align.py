@@ -113,14 +113,19 @@ def compute_onsets(vocals: Path, sr: int = 22050) -> list[float]:
         return []
 
 
-def _encode_transcript(text: str, vocab: dict[str, int],
-                       blank: int = 0) -> tuple[list[int], list[tuple[str, int, int]]]:
-    """Текст -> (ids меток CTC, [(слово, s_tok, e_tok)]). Неизвестные буквы дропаются."""
+def _encode_tokens(words: list[str], vocab: dict[str, int],
+                   blank: int = 0) -> tuple[list[int], list[tuple[str, int, int]]]:
+    """Список словоформ (уже нормализованных) -> (ids меток CTC, [(слово, s_tok, e_tok)]).
+
+    Неизвестные буквы дропаются, пустые слова дают пустой диапазон —
+    вызыватель оставит им fallback-тайминг. '|' между словами (если есть
+    в словаре) разделяет одинаковые буквы на стыке слов.
+    """
     sep = vocab.get("|")
     labels: list[int] = []
     ranges: list[tuple[str, int, int]] = []
     first = True
-    for w in norm_for_align(text).split():
+    for w in words:
         if not first and sep is not None and sep != blank:
             labels.append(sep)
         first = False
@@ -134,6 +139,12 @@ def _encode_transcript(text: str, vocab: dict[str, int],
             labels.append(tid)
         ranges.append((w, s, len(labels)))
     return labels, ranges
+
+
+def _encode_transcript(text: str, vocab: dict[str, int],
+                       blank: int = 0) -> tuple[list[int], list[tuple[str, int, int]]]:
+    """Текст -> (ids меток CTC, [(слово, s_tok, e_tok)]). Неизвестные буквы дропаются."""
+    return _encode_tokens(norm_for_align(text).split(), vocab, blank)
 
 
 def _ctc_word_times(log_probs, labels: list[int],
@@ -266,6 +277,79 @@ class WordAligner:
             log.exception("align-модель не загрузилась — только onset-снап")
             self._ctc_dead = True
             return False
+
+    def ctc_align_text(self, audio_slice, offset: float,
+                       tokens: list[str]) -> list[tuple[str, float, float, float]]:
+        """Произвольный текст -> [(слово, s, e, conf)] по аудио-слайсу.
+
+        tokens — слова для показа (оригинальный регистр/пунктуация), offset —
+        начало слайса в секундах трека. Пустой список — CTC недоступен
+        (нет модели) или текст пуст: вызыватель делает fallback.
+        Пустые после нормализации токены интерполируются между соседями.
+        """
+        import math
+
+        if not tokens:
+            return []
+        try:
+            import numpy as np
+            import torch
+        except ImportError:
+            return []
+        try:
+            if not self._ensure_ctc():
+                return []
+            norms = [norm_for_align(t) for t in tokens]
+            kept = [(i, n) for i, n in enumerate(norms) if n]
+            if not kept:
+                return []
+            vocab = self._processor.tokenizer.get_vocab()
+            labels, ranges = _encode_tokens([n for _, n in kept], vocab)
+            if not labels:
+                return []
+            chunk = np.asarray(audio_slice, dtype=np.float32)
+            inputs = self._processor(chunk, sampling_rate=ALIGN_SR,
+                                     return_tensors="pt", padding=True)
+            t_frames = inputs.input_values.shape[1] // 320 + 1
+            if t_frames * len(labels) > 50_000_000:
+                log.warning("CTC чанк слишком длинный (%d фреймов x %d меток) — fallback",
+                            t_frames, len(labels))
+                return []
+            with torch.no_grad():
+                logits = self._model(inputs.input_values.to(self._device)).logits[0].cpu()
+            log_probs = torch.log_softmax(logits, dim=-1)
+            times = _ctc_word_times(log_probs, labels, ranges, blank=0,
+                                    frame_dur=FRAME_DUR, offset=offset)
+            per_display: list[tuple[float, float, float] | None] = [None] * len(tokens)
+            for (di, _n), (s, e, c) in zip(kept, times, strict=False):
+                if not math.isnan(s) and c >= 0.05:
+                    per_display[di] = (s, max(e, s + 0.03), c)
+            # пустые/не найденные — равномерно между соседними якорями
+            out: list[tuple[str, float, float, float]] = [(w, 0.0, 0.0, 0.0) for w in tokens]
+            k = 0
+            while k < len(tokens):
+                if per_display[k] is not None:
+                    s, e, c = per_display[k]
+                    out[k] = (tokens[k], r3(s), r3(e), c)
+                    k += 1
+                    continue
+                j = k
+                while j < len(tokens) and per_display[j] is None:
+                    j += 1
+                lo = out[k - 1][2] if k > 0 else offset
+                hi_t = per_display[j][0] if j < len(tokens) else None
+                if hi_t is None:
+                    hi_t = lo + max(0.5, (j - k) * 0.4)
+                cnt = j - k
+                for q in range(cnt):
+                    s = lo + (hi_t - lo) * q / cnt
+                    e = lo + (hi_t - lo) * (q + 1) / cnt
+                    out[k + q] = (tokens[k + q], r3(s), r3(e), 0.0)
+                k = j
+            return out
+        except Exception:
+            log.exception("ctc_align_text упал — fallback")
+            return []
 
     def _ctc_words(self, audio, seg: dict, seg_s: float, seg_e: float) -> list[dict] | None:
         """Пересчитать слова сегмента через CTC. None — откат на whisper."""
