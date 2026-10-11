@@ -83,14 +83,14 @@ def test_pipeline_overlays_custom_text(api, tmp_path):
     src = tmp_path / "in.wav"
     wav(src)
     jid = _upload(api, "/v1/jobs", src, lang="ru",
-                  lyrics_text="hello brave world").json()["job_id"]
+                  lyrics_text="A").json()["job_id"]
     st = _wait_done(api, jid)
     assert st["state"] == "done", st
     r = api.get(f"/v1/jobs/{jid}/result")
     z = zipfile.ZipFile(io.BytesIO(r.content))
     lyrics = __import__("json").loads(z.read("lyrics.json"))
     texts = " ".join(s["text"] for s in lyrics["segments"])
-    assert "brave" in texts, texts
+    assert texts == "A", texts
 
 
 def test_pipeline_error(api, tmp_path, monkeypatch):
