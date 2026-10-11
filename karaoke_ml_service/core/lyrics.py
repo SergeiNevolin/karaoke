@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import math
 import re
 
 
@@ -62,3 +63,41 @@ def normalize_words(words: list[dict], seg_s: float, seg_e: float) -> list[dict]
         out.append({**w, "s": s, "e": e})
         prev = e
     return out
+
+
+#: минимальная длительность сегмента (сек). Бэкенд требует end > start строго
+#: (karaoke_api/store/songs.py:109)
+MIN_SEG_DUR = 0.03
+
+
+def sanitize_segments(segments: list[dict]) -> tuple[list[dict], dict]:
+    """Гарантия валидности сегментов перед бандлом: end > start, числа конечны.
+
+    Источники дегенератов: схлопывание r3-округления в Whisper ([32.52, 32.52]),
+    переписанные алайнером границы, точечные строки. Двигаем ТОЛЬКО границу
+    сегмента (+MIN_SEG_DUR), тайминги слов не трогаем; сегменты с нечисловыми
+    границами дропаем (иначе уронят всю задачу на публикации).
+    Возвращает (сегменты, {"repaired": n, "dropped": m}).
+    """
+    out: list[dict] = []
+    repaired = dropped = 0
+    for s in segments or []:
+        if not isinstance(s, dict):
+            dropped += 1
+            continue
+        try:
+            start = float(s.get("start", float("nan")))
+            end = float(s.get("end", float("nan")))
+        except (TypeError, ValueError):
+            dropped += 1
+            continue
+        if not (math.isfinite(start) and math.isfinite(end)):
+            dropped += 1
+            continue
+        if end <= start:
+            end = round(start + MIN_SEG_DUR, 3)
+            repaired += 1
+            out.append({**s, "start": start, "end": end})
+        else:
+            out.append(dict(s))
+    return out, {"repaired": repaired, "dropped": dropped}

@@ -55,6 +55,25 @@ def test_custom_text_overlay(tmp_path):
     assert texts == "a", texts
 
 
+def test_degenerate_whisper_segment_sanitized(tmp_path):
+    """Схлопнувшийся сегмент Whisper [x, x] чинится до валидного — бэкенд примет."""
+
+    class DegenerateTranscriber(FakeTranscriber):
+        def transcribe(self, audio, lang=None):
+            self.calls.append((audio, lang))
+            return {"language": "ru", "segments": [
+                {"start": 32.52, "end": 32.52, "text": "э",
+                 "words": [{"w": "э", "s": 32.52, "e": 32.52}]},
+                {"start": 0.0, "end": 1.0, "text": "a",
+                 "words": [{"w": "a", "s": 0.0, "e": 1.0}]},
+            ]}
+
+    res = _pipe(transcriber=DegenerateTranscriber()).run(
+        _src(tmp_path), tmp_path / "work")
+    for s in res["lyrics"]["segments"]:
+        assert s["end"] > s["start"], s
+
+
 def test_audio_ext_no_demux(monkeypatch, tmp_path):
     monkeypatch.setattr(pipeline_mod, "demux",
                         lambda *a, **kw: pytest.fail("для аудио demux не нужен"))

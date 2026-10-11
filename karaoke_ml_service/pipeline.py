@@ -20,7 +20,7 @@ from .config import (
 )
 from .core.align import WordAligner
 from .core.custom_align import align_custom_text
-from .core.lyrics import clean_lines
+from .core.lyrics import clean_lines, sanitize_segments
 from .core.pitch import PitchExtractor
 from .core.separate import VocalSeparator
 from .core.transcribe import Transcriber
@@ -94,6 +94,7 @@ class KaraokePipeline:
 
         report("lyrics", STAGE_PROGRESS["lyrics"][0])
         lyrics = self._transcribe(vocals, lang=lang, text=text)
+        lyrics = self._sanitize_lyrics(lyrics)
         report("lyrics", STAGE_PROGRESS["lyrics"][1])
 
         report("pitch", STAGE_PROGRESS["pitch"][0])
@@ -172,6 +173,20 @@ class KaraokePipeline:
         finally:
             if owned_al:
                 aligner.close()
+
+    @staticmethod
+    def _sanitize_lyrics(data: dict) -> dict:
+        """Финальная страховка перед бандлом: чиним/режем битые сегменты.
+
+        Дегенераты [x, x] прилетают из самого Whisper (схлопывание r3),
+        из переписанных алайнером границ и из точечных строк — любой из них
+        роняет публикацию в бэкенде (validate_lyrics требует end > start).
+        """
+        segments = data.get("segments", []) or []
+        clean, info = sanitize_segments(segments)
+        if info["repaired"] or info["dropped"]:
+            log.warning("санация сегментов: %s", info)
+        return {**data, "segments": clean}
 
     def _pitch_of(self, vocals: Path) -> dict:
         owned = self._pitch is None

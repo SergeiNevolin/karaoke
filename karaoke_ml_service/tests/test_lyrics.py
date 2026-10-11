@@ -1,5 +1,11 @@
 """Примитивы текстов песен: нормализация, чистка строк, раскладка, выпрямление."""
-from karaoke_ml_service.core.lyrics import clean_lines, even_words, norm, normalize_words
+from karaoke_ml_service.core.lyrics import (
+    clean_lines,
+    even_words,
+    norm,
+    normalize_words,
+    sanitize_segments,
+)
 
 
 def test_norm():
@@ -35,3 +41,29 @@ def test_normalize_words_clamps_and_orders():
     for w in out:
         assert w["s"] <= w["e"] and w["s"] >= prev
         prev = w["e"]
+
+
+def test_sanitize_repairs_degenerate_segment():
+    segs = [{"start": 32.52, "end": 32.52, "text": "э",
+             "words": [{"w": "э", "s": 32.52, "e": 32.52}]}]
+    out, info = sanitize_segments(segs)
+    assert info == {"repaired": 1, "dropped": 0}
+    assert out[0]["end"] > out[0]["start"]
+    # слова не тронуты — двигалась только граница сегмента
+    assert (out[0]["words"][0]["s"], out[0]["words"][0]["e"]) == (32.52, 32.52)
+
+
+def test_sanitize_repairs_inversion_and_drops_garbage():
+    segs = [{"start": 5.0, "end": 3.0, "text": "x", "words": []},
+            {"start": float("nan"), "end": 1.0, "text": "y", "words": []},
+            "мусор",
+            {"start": 0.0, "end": 1.0, "text": "ok", "words": []}]
+    out, info = sanitize_segments(segs)
+    assert info == {"repaired": 1, "dropped": 2}
+    assert [(s["start"], s["end"]) for s in out] == [(5.0, 5.03), (0.0, 1.0)]
+
+
+def test_sanitize_keeps_valid_untouched():
+    segs = [{"start": 1.0, "end": 2.0, "text": "a", "words": []}]
+    out, info = sanitize_segments(segs)
+    assert out == segs and info == {"repaired": 0, "dropped": 0}
