@@ -211,15 +211,12 @@ COVER_MAX_MB = 5
 COVER_SIZE = 1000
 
 
-def save_cover(sid: str, data: bytes) -> dict:
-    """Обложка песни: проверка, ресайз до 1000px, JPEG в Silo, флаг в каталог.
+def normalize_cover(data: bytes) -> bytes:
+    """Обработать байты обложки: альфу на чёрный, thumbnail 1000px, JPEG q85.
 
-    Нет песни — KeyError; мусор вместо картинки или перевес — ValueError.
+    Пыль вместо картинки — ValueError('не картинка'); используют и ручную
+    загрузку (save_cover), и встроенную в исходник (pipeline._attach_cover).
     """
-    if not read_meta(sid):
-        raise KeyError(f"нет песни {sid}")
-    if len(data) > COVER_MAX_MB * 1024 * 1024:
-        raise ValueError(f"обложка больше {COVER_MAX_MB} МБ")
     import io
     try:
         img = Image.open(io.BytesIO(data))
@@ -235,7 +232,20 @@ def save_cover(sid: str, data: bytes) -> dict:
     img.thumbnail((COVER_SIZE, COVER_SIZE), Image.LANCZOS)
     buf = io.BytesIO()
     img.save(buf, "JPEG", quality=85)
-    silo.put(song_key(sid, "cover.jpg"), buf.getvalue(), "image/jpeg")
+    return buf.getvalue()
+
+
+def save_cover(sid: str, data: bytes) -> dict:
+    """Обложка песни: проверка, ресайз до 1000px, JPEG в Silo, флаг в каталог.
+
+    Нет песни — KeyError; мусор вместо картинки или перевес — ValueError.
+    """
+    if not read_meta(sid):
+        raise KeyError(f"нет песни {sid}")
+    if len(data) > COVER_MAX_MB * 1024 * 1024:
+        raise ValueError(f"обложка больше {COVER_MAX_MB} МБ")
+    jpeg = normalize_cover(data)
+    silo.put(song_key(sid, "cover.jpg"), jpeg, "image/jpeg")
     catalog.upsert(sid, has_cover=True)
     return {"cover": f"songs/{sid}/cover.jpg"}
 

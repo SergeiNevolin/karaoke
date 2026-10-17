@@ -5,6 +5,8 @@ import wave
 import zipfile
 from pathlib import Path
 
+from PIL import Image
+
 import karaoke_api.worker as W
 from karaoke_api import silo
 from karaoke_api.config import SCRATCH
@@ -64,10 +66,11 @@ class FakeGpu:
         return {"models": "fake"}
 
 
-def _run(gpu=None, *, title="Test", src_name="song.mp3", lyrics_text="",
-         lyrics_url="", publisher=None, poll_interval=0.0, timeout_sec=5.0, fetcher=None):
+def _run(gpu=None, *, title="Test", src_name="song.mp3", src_data: bytes | None = None,
+         lyrics_text="", lyrics_url="", publisher=None, poll_interval=0.0,
+         timeout_sec=5.0, fetcher=None):
     src_key = f"music/{src_name}"
-    silo.put(src_key, b"fake-audio")
+    silo.put(src_key, b"fake-audio" if src_data is None else src_data)
     registry = JobRegistry(ttl_sec=60)
     job = registry.create(title=title, audio=src_key, lang="ru",
                           lyrics_text=lyrics_text, lyrics_url=lyrics_url)
@@ -199,6 +202,70 @@ def test_run_job_missing_source():
             publisher=lambda sid: None, poll_interval=0.0, timeout_sec=5.0)
     assert job.state == "error"
     assert "не найден" in (job.error or "")
+
+
+def _source_with_cover(tmp_path, jpeg: bytes) -> Path:
+    """Mp3 из одного ID3-v2-тега без MPEG-потока: mutagen.File такой файл не
+    ритмизует, но cover_bytes достаёт теги напрямую (ID3-фоллбек) — ровно как
+    для урезанных аплоадов. Плюс это стабильная фикстура без синтетики кадра."""
+    from mutagen.id3 import APIC, ID3
+
+    src = tmp_path / "with-cover.mp3"
+    tags = ID3()
+    tags.add(APIC(encoding=0, mime="image/jpeg", type=3, desc="", data=jpeg))
+    tags.save(src, v2_version=3)
+    return src
+
+
+def test_cover_bytes_reads_tag_only_file(tmp_path):
+    """Через cover_bytes: тег-only mp3 (MutagenFile молчит) — картинка берётся."""
+    from mutagen.id3 import APIC, ID3
+
+    from karaoke_api.media_meta import cover_bytes
+
+    buf = io.BytesIO()
+    Image.new("RGB", (40, 40), (10, 200, 10)).save(buf, "JPEG")
+    src = tmp_path / "tag-only.mp3"
+    tags = ID3()
+    tags.add(APIC(encoding=0, mime="image/jpeg", type=3, desc="", data=buf.getvalue()))
+    tags.save(src, v2_version=3)
+    assert cover_bytes(src) == buf.getvalue()
+
+
+def test_run_job_pulls_cover_from_metadata(tmp_path):
+    """Обложка из меты исходника — как в mashups: attached picture из тегов
+    (ID3 APIC) нормализуется и лежит в песне как songs/<sid>/cover.jpg."""
+    buf = io.BytesIO()
+    Image.new("RGB", (40, 40), (200, 10, 10)).save(buf, "JPEG")
+    src = _source_with_cover(tmp_path, buf.getvalue())
+
+    registry, job, _ = _run(src_data=src.read_bytes())
+    assert job.state == "done"
+    cover = silo.get("songs/test/cover.jpg")
+    assert cover is not None
+    img = Image.open(io.BytesIO(cover))
+    assert img.format == "JPEG"
+
+
+def test_attach_cover_skips_oversize(monkeypatch, tmp_path):
+    from karaoke_api import pipeline as P
+    from karaoke_api.store.songs import COVER_MAX_MB
+
+    monkeypatch.setattr(P, "cover_bytes", lambda _p: b"x" * (COVER_MAX_MB * 1024 * 1024 + 1))
+    bdir = tmp_path / "bundle"
+    bdir.mkdir()
+    P._attach_cover(bdir, tmp_path / "src.mp3")
+    assert not (bdir / "cover.jpg").exists()
+
+
+def test_attach_cover_skips_garbage_picture(monkeypatch, tmp_path):
+    from karaoke_api import pipeline as P
+
+    monkeypatch.setattr(P, "cover_bytes", lambda _p: b"not-an-image")
+    bdir = tmp_path / "bundle"
+    bdir.mkdir()
+    P._attach_cover(bdir, tmp_path / "src.mp3")
+    assert not (bdir / "cover.jpg").exists()
 
 
 def test_worker_submit_registers_job():

@@ -17,9 +17,19 @@ from pathlib import Path
 from . import silo
 from .config import JOB_TIMEOUT_SEC, KARAOKE_ML_SERVICE_URL, MAX_BUNDLE_MB, POLL_INTERVAL_SEC, SCRATCH
 from .gpu_client import GpuClient, GpuError
+from .media_meta import cover_bytes
 from .registry import Job, JobRegistry
 from .store.publish import publish_one
-from .store.songs import sha1_of, song_key, song_prefix, unique_sid, validate_lyrics, wav_seconds
+from .store.songs import (
+    COVER_MAX_MB,
+    normalize_cover,
+    sha1_of,
+    song_key,
+    song_prefix,
+    unique_sid,
+    validate_lyrics,
+    wav_seconds,
+)
 from .utils import atomic_write_json, now_iso, slug
 
 log = logging.getLogger(__name__)
@@ -68,8 +78,9 @@ def _run(job: Job, registry: JobRegistry, *, scratch: Path, gpu_factory, fetcher
         source_sha1 = sha1_of(local_audio)
         remote_id = gpu.submit_job(local_audio, job.lang, custom_text)
         _poll(gpu, remote_id, job, registry, interval=poll_interval, timeout_sec=timeout_sec)
+        source_local = local_audio
     return _install(job, gpu.job_result(remote_id), scratch=scratch, gpu=gpu,
-                    publisher=publisher, source_sha1=source_sha1)
+                    publisher=publisher, source_sha1=source_sha1, source=source_local)
 
 
 def _poll(gpu, remote_id: str, job: Job, registry: JobRegistry,
@@ -104,7 +115,7 @@ def _source_file(src, scratch: Path):
 
 
 def _install(job: Job, raw: bytes, *, scratch: Path, gpu, publisher,
-             source_sha1: str | None) -> str:
+             source_sha1: str | None, source: Path | None = None) -> str:
     """Распаковать бандл в scratch и залить в store; meta.json — последним."""
     bdir = scratch / "bundle"
     _rmtree(bdir)
@@ -123,6 +134,7 @@ def _install(job: Job, raw: bytes, *, scratch: Path, gpu, publisher,
         if silo.list_keys(prefix):
             # sid свободен по meta.json, но объекты уже есть — сироты без метаданных
             silo.delete_prefix(prefix)
+        _attach_cover(bdir, source)
         meta = _meta_for(job, sid, language, len(segments), now_iso(), gpu,
                          bdir / "minus.wav", source_sha1)
         for f in sorted(bdir.iterdir()):
@@ -146,6 +158,31 @@ def _publish(sid: str, publisher) -> None:
             publisher(sid)
         except Exception as e2:
             raise PipelineError(f"Сохранено, но публикация упала: {e2}") from e2
+
+
+def _attach_cover(bdir: Path, source: Path | None) -> None:
+    """Обложка из меты исходника — как в mashups: attached picture из тегов.
+
+    ffmpeg в API нет, теги читает mutagen (media_meta.cover_bytes). Любое
+    отклонение (нет картинки, кривая, перевес) — песня просто без обложки:
+    ручную PUT /api/songs/<id>/cover это потом не мешает.
+    """
+    if source is None:
+        return
+    try:
+        raw = cover_bytes(source)
+    except Exception as e:  # мета обязана уметь падать тихо
+        log.debug("cover: извлечение из %s не удалось: %s", source, e)
+        return
+    if not raw:
+        return
+    if len(raw) > COVER_MAX_MB * 1024 * 1024:
+        log.info("cover из %s больше %d МБ — пропускаю", source, COVER_MAX_MB)
+        return
+    try:
+        (bdir / "cover.jpg").write_bytes(normalize_cover(raw))
+    except ValueError as e:
+        log.debug("cover: не картинка (%s) — без обложки", e)
 
 
 def _meta_for(job: Job, sid: str, language: str, lines: int, now: str, gpu,
